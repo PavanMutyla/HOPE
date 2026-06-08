@@ -16,6 +16,7 @@ from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.openai.stt import OpenAISTTService
 from pipecat.transports.local.audio import LocalAudioTransport, LocalAudioTransportParams
 
+from core.observability import LangfuseTracer, LangfuseObserver
 from core.prompt import SYSTEM_PROMPT
 from core.settings import settings
 from core.status import StatusPanel, StatusMonitor
@@ -75,14 +76,20 @@ async def main():
     pre_monitor = StatusMonitor(panel)
     post_monitor = StatusMonitor(panel)
 
+    tracer = LangfuseTracer()
+    pre_trace = LangfuseObserver(tracer)
+    post_trace = LangfuseObserver(tracer)
+
     pipeline = Pipeline([
         transport.input(),
         vad,
         stt,
         pre_monitor,
+        pre_trace,
         context_aggregator.user(),
         llm,
         post_monitor,
+        post_trace,
         tts,
         context_aggregator.assistant(),
         transport.output(),
@@ -98,6 +105,7 @@ async def main():
         await runner.run(worker)
     finally:
         panel.stop()
+        tracer.shutdown()
 
 
 if __name__ == "__main__":

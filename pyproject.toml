@@ -12,6 +12,7 @@ pyaudio = "0.2.14"
 python-dotenv = "1.2.2"
 rich = "15.0.0"
 pydantic-settings = "2.14.1"
+langfuse = "^4.7.1"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "9.0.3"
