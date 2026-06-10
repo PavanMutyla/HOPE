@@ -1,8 +1,6 @@
 import asyncio
-import time
 
 from loguru import logger
-from openai import AsyncOpenAI
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.pipeline.pipeline import Pipeline
@@ -20,23 +18,6 @@ from core.observability import LangfuseTracer, LangfuseObserver
 from core.prompt import SYSTEM_PROMPT
 from core.settings import settings
 from core.status import StatusPanel, StatusMonitor
-
-
-async def warmup_services():
-    """Pre-establish TLS connection to api.openai.com — shared by STT, LLM, and TTS."""
-    start = time.perf_counter()
-    logger.info("Warming up services...")
-
-    client = AsyncOpenAI(api_key=settings.openai_api_key)
-    # A minimal LLM call is enough — all OpenAI services reuse the same connection pool.
-    await client.chat.completions.create(
-        model=settings.llm_model,
-        messages=[{"role": "user", "content": "hi"}],
-        max_tokens=1,
-    )
-
-    elapsed = time.perf_counter() - start
-    logger.info(f"Services ready in {elapsed:.2f}s")
 
 
 async def main():
@@ -97,7 +78,6 @@ async def main():
 
     worker = PipelineWorker(pipeline, params=PipelineParams())
 
-    await warmup_services()
     logger.info("HOPE is ready — start speaking!")
     panel.start()
     try:
