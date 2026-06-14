@@ -23,7 +23,7 @@ from pipecat.workers.runner import WorkerRunner
 
 from core.observability import LangfuseTracer, LangfuseObserver
 from core.prompt import SYSTEM_PROMPT
-from core.settings import settings
+from settings import settings
 from core.status import StatusPanel, StatusMonitor
 
 

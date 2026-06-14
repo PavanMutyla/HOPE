@@ -1,6 +1,6 @@
 import pytest
 from pydantic import ValidationError
-from core.settings import Settings
+from settings import Settings
 
 
 def test_raises_when_openai_key_missing(monkeypatch):

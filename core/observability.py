@@ -15,7 +15,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
-from core.settings import settings
+from settings import settings
 
 
 class LangfuseTracer:
