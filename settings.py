@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     langfuse_base_url: str
     atlas_llm_model: str
     atlas_workspace: str
+    atlas_voice_id: str
 
 
 settings = Settings()

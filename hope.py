@@ -10,7 +10,8 @@ from pipecat.turns.user_turn_strategies import UserTurnStrategies
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineWorker, PipelineParams
-from pipecat.processors.aggregators.llm_context import LLMContext, ToolsSchema
+from pipecat.adapters.schemas.tools_schema import ToolsSchema
+from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
     LLMUserAggregatorParams,
@@ -25,7 +26,7 @@ from core.observability import LangfuseTracer, LangfuseObserver
 from core.prompt import SYSTEM_PROMPT
 from core.status import StatusPanel, StatusMonitor
 from settings import settings
-from tools.registry import delegate_to_atlas_schema, delegate_to_atlas_handler
+from tools.registry import ALL_SCHEMAS, setup as setup_tools
 
 
 async def main():
@@ -58,7 +59,7 @@ async def main():
         settings=CartesiaTTSService.Settings(voice=settings.cartesia_voice_id),
     )
 
-    tools = ToolsSchema(function_schemas=[delegate_to_atlas_schema])
+    tools = ToolsSchema(standard_tools=ALL_SCHEMAS)
     context = LLMContext(
         messages=[{"role": "system", "content": SYSTEM_PROMPT}],
         tools=tools,
@@ -111,11 +112,7 @@ async def main():
         ),
     )
 
-    llm.register_function(
-        "delegate_to_atlas",
-        delegate_to_atlas_handler,
-        cancel_on_interruption=False,
-    )
+    setup_tools(llm, context)
 
     @worker.event_handler("on_pipeline_started")
     async def on_pipeline_started(worker, frame):

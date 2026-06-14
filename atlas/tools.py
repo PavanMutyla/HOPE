@@ -1,9 +1,9 @@
 import json
-import shutil
 from pathlib import Path
 
 import aiofiles
 import aiofiles.os
+import send2trash
 
 
 def _safe_path(workspace: Path, user_path: str) -> Path:
@@ -47,16 +47,37 @@ async def delete_file(workspace: Path, path: str) -> str:
     target = _safe_path(workspace, path)
     if not await aiofiles.os.path.exists(target):
         raise FileNotFoundError(f"File not found: {path}")
-    await aiofiles.os.remove(target)
-    return f"Deleted file {path}."
+    await aiofiles.os.wrap(send2trash.send2trash)(str(target))
+    return f"Moved {path} to trash."
 
 
 async def list_directory(workspace: Path, path: str = ".") -> str:
     target = _safe_path(workspace, path)
     if not await aiofiles.os.path.isdir(target):
         raise NotADirectoryError(f"Not a directory: {path}")
+    entries = sorted(await aiofiles.os.listdir(target))
+    if not entries:
+        return f"Directory '{path}' is empty."
+    lines = []
+    for entry in entries:
+        kind = "folder" if (target / entry).is_dir() else "file"
+        lines.append(f"  {kind}: {entry}")
+    return f"Contents of '{path}' ({len(entries)} items):\n" + "\n".join(lines)
+
+
+async def delete_all_in_directory(workspace: Path, path: str = ".") -> str:
+    target = _safe_path(workspace, path)
+    if not await aiofiles.os.path.isdir(target):
+        raise NotADirectoryError(f"Not a directory: {path}")
     entries = await aiofiles.os.listdir(target)
-    return json.dumps(sorted(entries))
+    if not entries:
+        return f"Directory '{path}' is already empty — nothing to delete."
+    trashed = []
+    for entry in entries:
+        entry_path = target / entry
+        await aiofiles.os.wrap(send2trash.send2trash)(str(entry_path))
+        trashed.append(entry)
+    return f"Moved {len(trashed)} items to trash from '{path}': {', '.join(trashed)}."
 
 
 async def create_directory(workspace: Path, path: str) -> str:
@@ -69,8 +90,8 @@ async def delete_directory(workspace: Path, path: str) -> str:
     target = _safe_path(workspace, path)
     if not await aiofiles.os.path.isdir(target):
         raise NotADirectoryError(f"Not a directory: {path}")
-    await aiofiles.os.wrap(shutil.rmtree)(target)
-    return f"Deleted directory {path} and all its contents."
+    await aiofiles.os.wrap(send2trash.send2trash)(str(target))
+    return f"Moved directory {path} to trash."
 
 
 TOOL_SCHEMAS = [
@@ -92,7 +113,7 @@ TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "write_file",
-            "description": "Create or overwrite a file with the given content.",
+            "description": "Create or overwrite a FILE (not a folder) with the given content. Always use this when asked to create a file.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -151,7 +172,7 @@ TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "create_directory",
-            "description": "Create a directory (and any missing parent directories).",
+            "description": "Create a FOLDER/DIRECTORY only — never use this to create files. Use write_file for files.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -165,13 +186,27 @@ TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "delete_directory",
-            "description": "Permanently delete a directory and all its contents.",
+            "description": "Permanently delete a single FOLDER and all its contents.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "path": {"type": "string", "description": "Path relative to workspace."}
                 },
                 "required": ["path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "delete_all_in_directory",
+            "description": "Delete ALL files and folders inside a directory in one call. Use this whenever asked to 'clear', 'empty', or 'delete everything in' a directory. Defaults to workspace root.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Path relative to workspace. Defaults to '.'."}
+                },
+                "required": [],
             },
         },
     },

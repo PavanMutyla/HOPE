@@ -17,6 +17,7 @@ _TOOL_DISPATCH: dict[str, Callable] = {
     "list_directory": fs.list_directory,
     "create_directory": fs.create_directory,
     "delete_directory": fs.delete_directory,
+    "delete_all_in_directory": fs.delete_all_in_directory,
 }
 
 ResultCallback = Callable[[str], Awaitable[None]]
