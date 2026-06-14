@@ -10,7 +10,7 @@ from pipecat.turns.user_turn_strategies import UserTurnStrategies
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineWorker, PipelineParams
-from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_context import LLMContext, ToolsSchema
 from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
     LLMUserAggregatorParams,
@@ -23,8 +23,9 @@ from pipecat.workers.runner import WorkerRunner
 
 from core.observability import LangfuseTracer, LangfuseObserver
 from core.prompt import SYSTEM_PROMPT
-from settings import settings
 from core.status import StatusPanel, StatusMonitor
+from settings import settings
+from tools.registry import delegate_to_atlas_schema, delegate_to_atlas_handler
 
 
 async def main():
@@ -57,7 +58,11 @@ async def main():
         settings=CartesiaTTSService.Settings(voice=settings.cartesia_voice_id),
     )
 
-    context = LLMContext(messages=[{"role": "system", "content": SYSTEM_PROMPT}])
+    tools = ToolsSchema(function_schemas=[delegate_to_atlas_schema])
+    context = LLMContext(
+        messages=[{"role": "system", "content": SYSTEM_PROMPT}],
+        tools=tools,
+    )
 
     context_aggregator = LLMContextAggregatorPair(
         context,
@@ -106,7 +111,12 @@ async def main():
         ),
     )
 
-    # ← correct signature: (worker, frame) — missing `frame` was the silent crash
+    llm.register_function(
+        "delegate_to_atlas",
+        delegate_to_atlas_handler,
+        cancel_on_interruption=False,
+    )
+
     @worker.event_handler("on_pipeline_started")
     async def on_pipeline_started(worker, frame):
         logger.info("Pipeline started — queuing greeting")
