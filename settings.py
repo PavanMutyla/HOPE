@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     langfuse_secret_key: str
     langfuse_base_url: str
     atlas_llm_model: str
+    atlas_workspace: str
 
 
 settings = Settings()
