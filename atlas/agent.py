@@ -6,7 +6,9 @@ from loguru import logger
 from openai import AsyncOpenAI
 
 from atlas.prompt import ATLAS_PROMPT
+from atlas.voice_prompt import ATLAS_VOICE_PROMPT
 from atlas import tools as fs
+from core.agent import VoiceAgent
 from settings import settings
 
 _TOOL_DISPATCH: dict[str, Callable] = {
@@ -96,3 +98,10 @@ class Atlas:
         except PermissionError as exc:
             logger.warning(f"Atlas blocked path traversal attempt: {exc}")
             return str(exc)
+
+
+atlas_agent = VoiceAgent(
+    name="atlas",
+    system_prompt=ATLAS_VOICE_PROMPT,
+    voice_id=settings.atlas_voice_id,
+)
