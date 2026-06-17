@@ -52,6 +52,27 @@
       "justMyCode": false
     },
     {
+      "name": "CI: Lint",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "ruff",
+      "args": ["check", "."],
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      "name": "CI: Run All (lint + tests)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "pytest",
+      "args": ["tests", "-v", "--tb=short"],
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "preLaunchTask": "ci: lint"
+    },
+    {
       "name": "HOPE: Run",
       "type": "debugpy",
       "request": "launch",

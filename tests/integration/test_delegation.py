@@ -14,7 +14,6 @@ import pytest
 async def test_delegation_acknowledges_immediately():
     """Handler must call result_callback synchronously before Atlas finishes."""
     from tools.registry import delegate_to_atlas_handler
-    from pipecat.frames.frames import FunctionCallResultProperties
 
     mock_params = MagicMock()
     mock_params.arguments = {"task": "create a file called test.txt"}

@@ -136,7 +136,6 @@ def test_env_example_keys_match_settings_fields(fake_env):
     Every key in .env.example must map to a field in Settings.
     Catches drift between the template and the actual config.
     """
-    import re
     from pathlib import Path
 
     env_example = Path(__file__).parents[2] / ".env.example"
