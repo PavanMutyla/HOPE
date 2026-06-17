@@ -13,14 +13,26 @@ python-dotenv = "1.2.2"
 rich = "15.0.0"
 pydantic-settings = "2.14.1"
 langfuse = "^4.7.1"
+aiofiles = "^25.1.0"
+send2trash = "^2.1.0"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "9.0.3"
 pytest-asyncio = "1.4.0"
+ruff = "^0.9.0"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+markers = [
+    "unit: Pure logic tests, no external dependencies",
+    "integration: Pipeline assembly and wiring tests with mocks",
+    "contract: Interface compliance tests for swappable components",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
 
 [build-system]
 requires = ["poetry-core"]

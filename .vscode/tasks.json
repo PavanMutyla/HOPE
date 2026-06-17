@@ -1,0 +1,29 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "ci: lint",
+      "type": "shell",
+      "command": "poetry run ruff check .",
+      "group": "test",
+      "presentation": { "reveal": "always", "panel": "shared" },
+      "problemMatcher": []
+    },
+    {
+      "label": "ci: test",
+      "type": "shell",
+      "command": "poetry run pytest -v --tb=short",
+      "group": "test",
+      "presentation": { "reveal": "always", "panel": "shared" },
+      "problemMatcher": []
+    },
+    {
+      "label": "ci: run all",
+      "dependsOrder": "sequence",
+      "dependsOn": ["ci: lint", "ci: test"],
+      "group": { "kind": "test", "isDefault": true },
+      "presentation": { "reveal": "always", "panel": "shared" },
+      "problemMatcher": []
+    }
+  ]
+}
