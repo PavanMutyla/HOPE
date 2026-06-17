@@ -8,7 +8,7 @@ from pipecat.services.llm_service import FunctionCallParams
 from atlas.agent import Atlas
 
 
-from core.orchestrator import VoiceOrchestrator
+from core.voice.orchestrator import VoiceOrchestrator
 
 atlas = Atlas()
 

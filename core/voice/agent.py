@@ -6,7 +6,7 @@ from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.services.cartesia.tts import CartesiaTTSSettings
 from pipecat.services.openai.llm import OpenAILLMService
 
-from core.agent_state import agent_state
+from core.voice.agent_state import agent_state
 
 
 @dataclass

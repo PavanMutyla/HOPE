@@ -2,7 +2,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from core.agent import AgentRegistry, VoiceAgent
+from core.voice.agent import AgentRegistry, VoiceAgent
 
 
 @pytest.fixture
@@ -70,7 +70,7 @@ async def test_switch_updates_agent_state(hope_agent, atlas_agent):
     context = MagicMock()
     context.messages = [{"role": "system", "content": "You are HOPE."}]
     llm = AsyncMock()
-    from core.agent_state import agent_state
+    from core.voice.agent_state import agent_state
     agent_state.active = "hope"
 
     await registry.switch("atlas", context, llm)

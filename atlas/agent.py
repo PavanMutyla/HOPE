@@ -8,7 +8,7 @@ from openai import AsyncOpenAI
 from atlas.prompt import ATLAS_PROMPT
 from atlas.voice_prompt import ATLAS_VOICE_PROMPT
 from atlas import tools as fs
-from core.agent import VoiceAgent
+from core.voice.agent import VoiceAgent
 from settings import settings
 
 _TOOL_DISPATCH: dict[str, Callable] = {

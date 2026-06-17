@@ -5,10 +5,10 @@ from pipecat.frames.frames import LLMRunFrame
 from pipecat.workers.runner import WorkerRunner
 
 from atlas.agent import atlas_agent
-from core.agent import AgentRegistry, VoiceAgent
-from core.orchestrator import VoiceOrchestrator
+from core.voice.agent import AgentRegistry, VoiceAgent
+from core.voice.orchestrator import VoiceOrchestrator
+from core.voice.pipeline import build_pipeline
 from core.prompt import SYSTEM_PROMPT
-from core.voice import build_pipeline
 from settings import settings
 from tools.registry import ALL_SCHEMAS, setup as setup_tools
 

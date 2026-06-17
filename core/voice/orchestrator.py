@@ -1,7 +1,7 @@
 from openai import AsyncOpenAI
 
-from core.agent import AgentRegistry
-from core.voice import VoicePipelineBundle
+from core.voice.agent import AgentRegistry
+from core.voice.pipeline import VoicePipelineBundle
 from settings import settings
 
 

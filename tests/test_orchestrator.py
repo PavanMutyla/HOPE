@@ -2,8 +2,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from core.agent import AgentRegistry, VoiceAgent
-from core.orchestrator import VoiceOrchestrator
+from core.voice.agent import AgentRegistry, VoiceAgent
+from core.voice.orchestrator import VoiceOrchestrator
 
 
 @pytest.fixture
@@ -19,7 +19,7 @@ async def test_agent_to_agent_uses_target_system_prompt(registry):
     mock_completion = MagicMock()
     mock_completion.choices[0].message.content = "I see 3 files."
 
-    with patch("core.orchestrator.AsyncOpenAI") as MockOpenAI:
+    with patch("core.voice.orchestrator.AsyncOpenAI") as MockOpenAI:
         mock_client = AsyncMock()
         MockOpenAI.return_value = mock_client
         mock_client.chat.completions.create = AsyncMock(return_value=mock_completion)
@@ -39,7 +39,7 @@ async def test_agent_to_agent_returns_empty_string_on_none(registry):
     mock_completion = MagicMock()
     mock_completion.choices[0].message.content = None
 
-    with patch("core.orchestrator.AsyncOpenAI") as MockOpenAI:
+    with patch("core.voice.orchestrator.AsyncOpenAI") as MockOpenAI:
         mock_client = AsyncMock()
         MockOpenAI.return_value = mock_client
         mock_client.chat.completions.create = AsyncMock(return_value=mock_completion)
@@ -56,7 +56,7 @@ async def test_switch_to_delegates_to_registry(registry):
     bundle.context.messages = [{"role": "system", "content": "You are HOPE."}]
     bundle.llm = AsyncMock()
 
-    with patch("core.orchestrator.AsyncOpenAI"):
+    with patch("core.voice.orchestrator.AsyncOpenAI"):
         orchestrator = VoiceOrchestrator(registry, bundle)
         await orchestrator.switch_to("atlas")
 

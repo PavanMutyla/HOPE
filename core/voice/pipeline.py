@@ -19,7 +19,7 @@ from pipecat.transports.local.audio import LocalAudioTransport, LocalAudioTransp
 from pipecat.turns.user_stop import TurnAnalyzerUserTurnStopStrategy
 from pipecat.turns.user_turn_strategies import UserTurnStrategies
 
-from core.agent import VoiceAgent
+from core.voice.agent import VoiceAgent
 from core.observability import LangfuseObserver, LangfuseTracer
 from core.status import StatusMonitor, StatusPanel
 from settings import settings
