@@ -4,7 +4,7 @@ from loguru import logger
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.workers.runner import WorkerRunner
 
-from atlas.agent import atlas_agent
+from sub_agents.atlas.agent import atlas_agent
 from core.voice.agent import AgentRegistry, VoiceAgent
 from core.voice.orchestrator import VoiceOrchestrator
 from core.voice.pipeline import build_pipeline

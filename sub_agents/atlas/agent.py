@@ -5,9 +5,9 @@ from typing import Awaitable, Callable
 from loguru import logger
 from openai import AsyncOpenAI
 
-from atlas.prompt import ATLAS_PROMPT
-from atlas.voice_prompt import ATLAS_VOICE_PROMPT
-from atlas import tools as fs
+from sub_agents.atlas.prompt import ATLAS_PROMPT
+from sub_agents.atlas.voice_prompt import ATLAS_VOICE_PROMPT
+from sub_agents.atlas import tools as fs
 from core.voice.agent import VoiceAgent
 from settings import settings
 

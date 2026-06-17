@@ -5,7 +5,7 @@ from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.frames.frames import FunctionCallResultProperties
 from pipecat.services.llm_service import FunctionCallParams
 
-from atlas.agent import Atlas
+from sub_agents.atlas.agent import Atlas
 
 
 from core.voice.orchestrator import VoiceOrchestrator
