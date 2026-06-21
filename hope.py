@@ -16,7 +16,7 @@ from tools.registry import ALL_SCHEMAS, setup as setup_tools
 hope_agent = VoiceAgent(
     name="hope",
     system_prompt=SYSTEM_PROMPT,
-    voice_id=settings.cartesia_voice_id,
+    voice_id=settings.kokoro_voice_id,
 )
 
 

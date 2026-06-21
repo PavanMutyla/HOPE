@@ -12,7 +12,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
     LLMUserAggregatorParams,
 )
-from pipecat.services.cartesia.tts import CartesiaTTSService
+from pipecat.services.kokoro.tts import KokoroTTSService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.openai.stt import OpenAISTTService
 from pipecat.transports.local.audio import LocalAudioTransport, LocalAudioTransportParams
@@ -30,7 +30,7 @@ class VoicePipelineBundle:
     pipeline: Pipeline
     worker: PipelineWorker
     llm: OpenAILLMService
-    tts: CartesiaTTSService
+    tts: KokoroTTSService
     context: LLMContext
     transport: LocalAudioTransport
     panel: StatusPanel
@@ -62,9 +62,8 @@ def build_pipeline(agent: VoiceAgent, tools: list[FunctionSchema]) -> VoicePipel
         settings=OpenAILLMService.Settings(model=settings.llm_model),
     )
 
-    tts = CartesiaTTSService(
-        api_key=settings.cartesia_api_key,
-        settings=CartesiaTTSService.Settings(voice=agent.voice_id),
+    tts = KokoroTTSService(
+        settings=KokoroTTSService.Settings(voice=agent.voice_id),
     )
 
     context = LLMContext(

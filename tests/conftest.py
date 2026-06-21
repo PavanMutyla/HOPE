@@ -32,6 +32,8 @@ def pytest_configure(config):
         "ATLAS_LLM_MODEL": "gpt-4o-mini",
         "ATLAS_WORKSPACE": "/tmp/test-atlas-workspace",
         "ATLAS_VOICE_ID": "test-atlas-voice-id",
+        "KOKORO_VOICE_ID": "af_heart",
+        "KOKORO_ATLAS_VOICE_ID": "af_bella",
     }
     for key, value in defaults.items():
         os.environ.setdefault(key, value)
@@ -60,6 +62,8 @@ def fake_env(monkeypatch):
     monkeypatch.setenv("ATLAS_LLM_MODEL", "gpt-4o-mini")
     monkeypatch.setenv("ATLAS_WORKSPACE", "/tmp/test-atlas-workspace")
     monkeypatch.setenv("ATLAS_VOICE_ID", "test-atlas-voice-id")
+    monkeypatch.setenv("KOKORO_VOICE_ID", "af_heart")
+    monkeypatch.setenv("KOKORO_ATLAS_VOICE_ID", "af_bella")
 
 
 # ─── Voice agent fixtures ────────────────────────────────────────
@@ -122,7 +126,7 @@ def pipeline_mocks(monkeypatch):
         "LocalAudioTransport",
         "OpenAISTTService",
         "OpenAILLMService",
-        "CartesiaTTSService",
+        "KokoroTTSService",
         "SileroVADAnalyzer",
         "LocalSmartTurnAnalyzerV3",
         "LangfuseTracer",
