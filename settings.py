@@ -17,6 +17,8 @@ class Settings(BaseSettings):
     atlas_llm_model: str
     atlas_workspace: str
     atlas_voice_id: str
+    kokoro_voice_id: str = "af_heart"
+    kokoro_atlas_voice_id: str = "af_bella"
 
 
 settings = Settings()

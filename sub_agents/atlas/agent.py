@@ -103,5 +103,5 @@ class Atlas:
 atlas_agent = VoiceAgent(
     name="atlas",
     system_prompt=ATLAS_VOICE_PROMPT,
-    voice_id=settings.atlas_voice_id,
+    voice_id=settings.kokoro_atlas_voice_id,
 )

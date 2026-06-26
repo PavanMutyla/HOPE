@@ -37,6 +37,8 @@ def test_loads_with_all_required_keys(fake_env):
     assert s.atlas_llm_model == "gpt-4o-mini"
     assert s.atlas_workspace == "/tmp/test-atlas-workspace"
     assert s.atlas_voice_id == "test-atlas-voice-id"
+    assert s.kokoro_voice_id == "af_heart"
+    assert s.kokoro_atlas_voice_id == "af_bella"
 
 
 @pytest.mark.unit
@@ -128,6 +130,34 @@ def test_raises_on_missing_atlas_voice_id(fake_env, monkeypatch):
     monkeypatch.delenv("ATLAS_VOICE_ID")
     with pytest.raises(ValidationError):
         Settings(_env_file=None)
+
+
+@pytest.mark.unit
+def test_kokoro_voice_id_defaults_to_af_heart(fake_env, monkeypatch):
+    monkeypatch.delenv("KOKORO_VOICE_ID", raising=False)
+    s = Settings(_env_file=None)
+    assert s.kokoro_voice_id == "af_heart"
+
+
+@pytest.mark.unit
+def test_kokoro_atlas_voice_id_defaults_to_af_bella(fake_env, monkeypatch):
+    monkeypatch.delenv("KOKORO_ATLAS_VOICE_ID", raising=False)
+    s = Settings(_env_file=None)
+    assert s.kokoro_atlas_voice_id == "af_bella"
+
+
+@pytest.mark.unit
+def test_kokoro_voice_id_can_be_overridden(fake_env, monkeypatch):
+    monkeypatch.setenv("KOKORO_VOICE_ID", "am_puck")
+    s = Settings(_env_file=None)
+    assert s.kokoro_voice_id == "am_puck"
+
+
+@pytest.mark.unit
+def test_kokoro_atlas_voice_id_can_be_overridden(fake_env, monkeypatch):
+    monkeypatch.setenv("KOKORO_ATLAS_VOICE_ID", "bm_george")
+    s = Settings(_env_file=None)
+    assert s.kokoro_atlas_voice_id == "bm_george"
 
 
 @pytest.mark.unit

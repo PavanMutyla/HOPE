@@ -74,6 +74,34 @@ async def test_switch_pushes_tts_frame(agent_registry):
 
 
 @pytest.mark.unit
+async def test_switch_tts_frame_carries_kokoro_settings(agent_registry):
+    from pipecat.frames.frames import TTSUpdateSettingsFrame
+    from pipecat.services.kokoro.tts import KokoroTTSSettings
+
+    context = MagicMock()
+    context.messages = [{"role": "system", "content": "You are HOPE."}]
+    llm = AsyncMock()
+
+    await agent_registry.switch("atlas", context, llm)
+
+    frame = llm.push_frame.call_args[0][0]
+    assert isinstance(frame, TTSUpdateSettingsFrame)
+    assert isinstance(frame.delta, KokoroTTSSettings)
+
+
+@pytest.mark.unit
+async def test_switch_tts_frame_carries_target_voice_id(agent_registry):
+    context = MagicMock()
+    context.messages = [{"role": "system", "content": "You are HOPE."}]
+    llm = AsyncMock()
+
+    await agent_registry.switch("atlas", context, llm)
+
+    frame = llm.push_frame.call_args[0][0]
+    assert frame.delta.voice == "atlas-v2"
+
+
+@pytest.mark.unit
 async def test_switch_updates_agent_state(agent_registry):
     from core.voice.agent_state import agent_state
 

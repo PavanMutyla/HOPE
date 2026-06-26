@@ -44,7 +44,7 @@ def test_tts_initialized_with_agent_voice_id(pipeline_mocks):
     agent = VoiceAgent(name="hope", system_prompt="You are HOPE.", voice_id="my-special-voice")
     build_pipeline(agent, [])
 
-    mock_tts_cls = pipeline_mocks["CartesiaTTSService"]
+    mock_tts_cls = pipeline_mocks["KokoroTTSService"]
     assert mock_tts_cls.called
     mock_tts_cls.Settings.assert_called_once_with(voice="my-special-voice")
 
@@ -88,6 +88,18 @@ def test_transport_is_constructed(pipeline_mocks):
     build_pipeline(agent, [])
 
     assert pipeline_mocks["LocalAudioTransport"].called
+
+
+@pytest.mark.integration
+def test_tts_does_not_receive_api_key(pipeline_mocks):
+    """KokoroTTSService is local — no API key should be passed."""
+    from core.voice.pipeline import build_pipeline
+
+    agent = VoiceAgent(name="hope", system_prompt="test", voice_id="af_heart")
+    build_pipeline(agent, [])
+
+    call_kwargs = pipeline_mocks["KokoroTTSService"].call_args.kwargs
+    assert "api_key" not in call_kwargs
 
 
 @pytest.mark.integration

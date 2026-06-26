@@ -3,7 +3,7 @@ from dataclasses import dataclass, field
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.frames.frames import TTSUpdateSettingsFrame
 from pipecat.processors.aggregators.llm_context import LLMContext
-from pipecat.services.cartesia.tts import CartesiaTTSSettings
+from pipecat.services.kokoro.tts import KokoroTTSSettings
 from pipecat.services.openai.llm import OpenAILLMService
 
 from core.voice.agent_state import agent_state
@@ -38,6 +38,6 @@ class AgentRegistry:
         msgs[0] = {"role": "system", "content": agent.system_prompt}
         context.set_messages(msgs)
         await llm.push_frame(
-            TTSUpdateSettingsFrame(delta=CartesiaTTSSettings(voice=agent.voice_id))
+            TTSUpdateSettingsFrame(delta=KokoroTTSSettings(voice=agent.voice_id))
         )
         agent_state.active = name
