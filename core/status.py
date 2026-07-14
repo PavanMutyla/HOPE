@@ -16,6 +16,8 @@ class StatusPanel:
     def __init__(self):
         self.state = "🎙  Listening..."
         self.last_transcript = ""
+        self.usage_line = ""
+        self.agent_name = ""
         self._live = Live(refresh_per_second=4)
         self._started = False
 
@@ -33,8 +35,22 @@ class StatusPanel:
         self.state = state
         self._refresh()
 
+    def set_agent(self, name: str):
+        self.agent_name = name
+        self._refresh()
+
     def set_transcript(self, text: str):
         self.last_transcript = text
+        self._refresh()
+
+    def set_usage(self, last_prompt: int, last_completion: int, total: int,
+                  context_pct: float, ttfb: float):
+        self.usage_line = (
+            f"{last_prompt} in / {last_completion} out"
+            f"  •  total {total}"
+            f"  •  ctx {context_pct:.1%}"
+            f"  •  ttfb {ttfb:.2f}s"
+        )
         self._refresh()
 
     def _refresh(self):
@@ -43,9 +59,13 @@ class StatusPanel:
 
     def _render(self) -> Panel:
         content = Text()
+        if self.agent_name:
+            content.append(f"  Agent:  {self.agent_name}\n")
         content.append(f"  State:  {self.state}\n")
         if self.last_transcript:
             content.append(f"  You:    \"{self.last_transcript}\"")
+        if self.usage_line:
+            content.append(f"\n  Tokens: {self.usage_line}")
         return Panel(content, title="HOPE", border_style="cyan")
 
 

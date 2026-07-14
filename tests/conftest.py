@@ -26,6 +26,7 @@ def pytest_configure(config):
         "LOG_LEVEL": "INFO",
         "STT_MODEL": "whisper-1",
         "LLM_MODEL": "gpt-4o",
+        "LLM_PROVIDER": "openai",
         "LANGFUSE_PUBLIC_KEY": "test-langfuse-pk",
         "LANGFUSE_SECRET_KEY": "test-langfuse-sk",
         "LANGFUSE_BASE_URL": "https://cloud.langfuse.com",
@@ -56,6 +57,7 @@ def fake_env(monkeypatch):
     monkeypatch.setenv("LOG_LEVEL", "INFO")
     monkeypatch.setenv("STT_MODEL", "whisper-1")
     monkeypatch.setenv("LLM_MODEL", "gpt-4o")
+    monkeypatch.setenv("LLM_PROVIDER", "openai")
     monkeypatch.setenv("LANGFUSE_PUBLIC_KEY", "test-langfuse-pk")
     monkeypatch.setenv("LANGFUSE_SECRET_KEY", "test-langfuse-sk")
     monkeypatch.setenv("LANGFUSE_BASE_URL", "https://cloud.langfuse.com")
@@ -135,6 +137,8 @@ def pipeline_mocks(monkeypatch):
         "PipelineWorker",
         "StatusPanel",
         "StatusMonitor",
+        "ContextSummarizer",
+        "AsyncOpenAI",
     ]}
 
     for name, mock in mocks.items():

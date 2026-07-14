@@ -26,6 +26,22 @@ async def test_connect_to_atlas_switches_active_agent(mock_orchestrator):
 
 
 @pytest.mark.integration
+async def test_connect_to_atlas_updates_status_panel(mock_orchestrator):
+    """switch_to() must update the status panel's active agent for the dashboard."""
+    from core.voice.agent_state import agent_state
+    from tools.registry import _make_connect_handler
+
+    agent_state.active = "hope"
+    handler = _make_connect_handler(mock_orchestrator)
+
+    mock_params = MagicMock()
+    mock_params.result_callback = AsyncMock()
+    await handler(mock_params)
+
+    mock_orchestrator.bundle.panel.set_agent.assert_called_once_with("atlas")
+
+
+@pytest.mark.integration
 async def test_connect_to_atlas_calls_result_callback(mock_orchestrator):
     from tools.registry import _make_connect_handler
 

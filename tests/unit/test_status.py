@@ -89,3 +89,62 @@ def test_unrecognised_frame_does_not_change_state():
     initial = panel.state
     monitor._handle_frame(Frame())
     assert panel.state == initial
+
+
+@pytest.mark.unit
+def test_set_usage_updates_usage_line():
+    panel = StatusPanel()
+    panel.set_usage(last_prompt=1200, last_completion=80, total=5400, context_pct=0.034, ttfb=0.41)
+    assert "1200" in panel.usage_line
+    assert "80" in panel.usage_line
+    assert "5400" in panel.usage_line
+    assert "3.4%" in panel.usage_line
+    assert "0.41" in panel.usage_line
+
+
+@pytest.mark.unit
+def test_usage_line_empty_before_first_turn():
+    panel = StatusPanel()
+    assert panel.usage_line == ""
+
+
+@pytest.mark.unit
+def test_render_includes_usage_line():
+    panel = StatusPanel()
+    panel.set_usage(last_prompt=10, last_completion=5, total=15, context_pct=0.5, ttfb=0.2)
+    rendered = panel._render()
+    # Panel renderable contains the usage text
+    text = rendered.renderable.plain
+    assert "Tokens" in text
+
+
+@pytest.mark.unit
+def test_agent_name_empty_by_default():
+    panel = StatusPanel()
+    assert panel.agent_name == ""
+
+
+@pytest.mark.unit
+def test_set_agent_updates_agent_name():
+    panel = StatusPanel()
+    panel.set_agent("atlas")
+    assert panel.agent_name == "atlas"
+
+
+@pytest.mark.unit
+def test_render_includes_agent_line_when_set():
+    panel = StatusPanel()
+    panel.set_agent("atlas")
+    rendered = panel._render()
+    text = rendered.renderable.plain
+    assert "Agent:  atlas" in text
+    # the agent line must be the first content line, above State
+    assert text.index("Agent:") < text.index("State:")
+
+
+@pytest.mark.unit
+def test_render_omits_agent_line_when_empty():
+    panel = StatusPanel()
+    rendered = panel._render()
+    text = rendered.renderable.plain
+    assert "Agent:" not in text

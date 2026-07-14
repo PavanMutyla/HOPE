@@ -18,8 +18,11 @@ from pipecat.services.openai.stt import OpenAISTTService
 from pipecat.transports.local.audio import LocalAudioTransport, LocalAudioTransportParams
 from pipecat.turns.user_stop import TurnAnalyzerUserTurnStopStrategy
 from pipecat.turns.user_turn_strategies import UserTurnStrategies
+from openai import AsyncOpenAI
 
 from core.voice.agent import VoiceAgent
+from core.voice.context_meter import ContextMeter, resolve_context_limit
+from core.voice.summarizer import ContextSummarizer
 from core.observability import LangfuseObserver, LangfuseTracer
 from core.status import StatusMonitor, StatusPanel
 from settings import settings
@@ -35,6 +38,7 @@ class VoicePipelineBundle:
     transport: LocalAudioTransport
     panel: StatusPanel
     tracer: LangfuseTracer
+    meter: ContextMeter
 
 
 def build_pipeline(agent: VoiceAgent, tools: list[FunctionSchema]) -> VoicePipelineBundle:
@@ -89,12 +93,26 @@ def build_pipeline(agent: VoiceAgent, tools: list[FunctionSchema]) -> VoicePipel
     )
 
     panel = StatusPanel()
+    panel.set_agent(agent.name)
     pre_monitor = StatusMonitor(panel)
     post_monitor = StatusMonitor(panel)
 
     tracer = LangfuseTracer()
     pre_trace = LangfuseObserver(tracer)
     post_trace = LangfuseObserver(tracer)
+
+    meter = ContextMeter(
+        context_limit=resolve_context_limit(
+            f"{settings.llm_provider}/{settings.llm_model}", settings.llm_context_limit
+        ),
+        threshold=settings.context_summarize_threshold,
+    )
+    summarizer = ContextSummarizer(
+        context=context,
+        meter=meter,
+        panel=panel,
+        client=AsyncOpenAI(api_key=settings.openai_api_key),
+    )
 
     pipeline = Pipeline([
         transport.input(),
@@ -105,6 +123,7 @@ def build_pipeline(agent: VoiceAgent, tools: list[FunctionSchema]) -> VoicePipel
         llm,
         post_monitor,
         post_trace,
+        summarizer,
         tts,
         context_aggregator.assistant(),
         transport.output(),
@@ -124,4 +143,5 @@ def build_pipeline(agent: VoiceAgent, tools: list[FunctionSchema]) -> VoicePipel
         transport=transport,
         panel=panel,
         tracer=tracer,
+        meter=meter,
     )
