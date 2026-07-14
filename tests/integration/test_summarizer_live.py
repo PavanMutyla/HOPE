@@ -15,7 +15,7 @@ from dotenv import dotenv_values
 from openai import AsyncOpenAI
 
 from core.voice.context_meter import ContextMeter
-from core.voice.summarizer import ContextSummarizer, SUMMARY_MAX_CONTEXT_PCT
+from core.voice.summarizer import ContextSummarizer
 
 _env = dotenv_values(".env")
 _key = _env.get("OPENAI_API_KEY", "")
