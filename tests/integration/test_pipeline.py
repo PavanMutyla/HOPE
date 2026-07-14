@@ -115,3 +115,19 @@ def test_pipeline_is_constructed_with_processors(pipeline_mocks):
     processors = mock_pipeline_cls.call_args[0][0]
     assert isinstance(processors, list)
     assert len(processors) > 0
+
+
+@pytest.mark.integration
+def test_bundle_has_context_meter(pipeline_mocks, hope_voice_agent):
+    from core.voice.pipeline import build_pipeline
+    bundle = build_pipeline(hope_voice_agent, [])
+    assert bundle.meter is not None
+    assert bundle.meter.context_limit > 0
+
+
+@pytest.mark.integration
+def test_pipeline_includes_context_summarizer(pipeline_mocks, hope_voice_agent):
+    from core.voice.pipeline import build_pipeline
+    build_pipeline(hope_voice_agent, [])
+    processors = pipeline_mocks["Pipeline"].call_args[0][0]
+    assert pipeline_mocks["ContextSummarizer"].return_value in processors

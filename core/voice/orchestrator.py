@@ -13,6 +13,7 @@ class VoiceOrchestrator:
 
     async def switch_to(self, name: str) -> None:
         await self._registry.switch(name, self.bundle.context, self.bundle.llm)
+        self.bundle.panel.set_agent(name)
 
     async def agent_to_agent(self, from_agent: str, to_agent: str, message: str) -> str:
         agent = self._registry.get(to_agent)

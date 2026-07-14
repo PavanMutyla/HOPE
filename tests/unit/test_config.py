@@ -31,6 +31,7 @@ def test_loads_with_all_required_keys(fake_env):
     assert s.log_level == "INFO"
     assert s.stt_model == "whisper-1"
     assert s.llm_model == "gpt-4o"
+    assert s.llm_provider == "openai"
     assert s.langfuse_public_key == "test-langfuse-pk"
     assert s.langfuse_secret_key == "test-langfuse-sk"
     assert s.langfuse_base_url == "https://cloud.langfuse.com"
@@ -86,6 +87,13 @@ def test_raises_on_missing_stt_model(fake_env, monkeypatch):
 @pytest.mark.unit
 def test_raises_on_missing_llm_model(fake_env, monkeypatch):
     monkeypatch.delenv("LLM_MODEL")
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None)
+
+
+@pytest.mark.unit
+def test_raises_on_missing_llm_provider(fake_env, monkeypatch):
+    monkeypatch.delenv("LLM_PROVIDER")
     with pytest.raises(ValidationError):
         Settings(_env_file=None)
 
@@ -186,3 +194,24 @@ def test_env_example_keys_match_settings_fields(fake_env):
             f"Key '{key}' is in .env.example but missing from Settings. "
             "Update settings.py or remove it from .env.example."
         )
+
+
+@pytest.mark.unit
+def test_llm_context_limit_default(fake_env):
+    from settings import Settings
+    s = Settings(_env_file=None)
+    assert s.llm_context_limit == 128000
+
+
+@pytest.mark.unit
+def test_context_summarize_threshold_default(fake_env):
+    from settings import Settings
+    s = Settings(_env_file=None)
+    assert s.context_summarize_threshold == 0.9
+
+
+@pytest.mark.unit
+def test_context_keep_recent_default(fake_env):
+    from settings import Settings
+    s = Settings(_env_file=None)
+    assert s.context_keep_recent == 6

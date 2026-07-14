@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     log_level: str
     stt_model: str
     llm_model: str
+    llm_provider: str  # litellm provider prefix for context-window lookup (openai, anthropic, ollama, ...)
     langfuse_public_key: str
     langfuse_secret_key: str
     langfuse_base_url: str
@@ -19,6 +20,10 @@ class Settings(BaseSettings):
     atlas_voice_id: str
     kokoro_voice_id: str = "af_heart"
     kokoro_atlas_voice_id: str = "af_bella"
+    llm_context_limit: int = 128000  # fallback only; real window is looked up per-model via litellm
+    context_summarize_threshold: float = 0.9
+    context_keep_recent: int = 6
+    summarizer_model: str = "gpt-4o-mini"  # OpenAI model used to compress context
 
 
 settings = Settings()
