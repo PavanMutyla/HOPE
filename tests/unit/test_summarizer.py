@@ -179,6 +179,8 @@ async def test_at_threshold_summarizes_and_rewrites_context():
     await summarizer._summary_task
 
     client.chat.completions.create.assert_awaited_once()
+    # summary output is capped at 20% of the context window (1000 → 200)
+    assert client.chat.completions.create.await_args.kwargs["max_tokens"] == 200
     assert messages[0] == {"role": "system", "content": "sys"}
     assert messages[1]["role"] == "developer"
     assert "compressed history" in messages[1]["content"]

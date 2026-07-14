@@ -13,6 +13,8 @@ from core.voice.context_meter import ContextMeter
 from core.status import StatusPanel
 from settings import settings
 
+SUMMARY_MAX_CONTEXT_PCT = 0.2  # summary output caps at 20% of the model's context window
+
 SUMMARY_SYSTEM_PROMPT = (
     "You compress conversation history for a voice assistant. Write a concise "
     "summary of the conversation below. Preserve: decisions made, facts stated, "
@@ -120,8 +122,9 @@ class ContextSummarizer(FrameProcessor):
             if not head:
                 return
             response = await self._client.chat.completions.create(
-                model=settings.llm_model,
+                model=settings.summarizer_model,
                 messages=build_summary_request(head),
+                max_tokens=max(1, int(self._meter.context_limit * SUMMARY_MAX_CONTEXT_PCT)),
             )
             summary = response.choices[0].message.content or ""
             # an agent switch may have replaced messages[0] while we awaited

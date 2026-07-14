@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     llm_context_limit: int = 128000  # fallback only; real window is looked up per-model via litellm
     context_summarize_threshold: float = 0.9
     context_keep_recent: int = 6
+    summarizer_model: str = "gpt-4o-mini"  # OpenAI model used to compress context
 
 
 settings = Settings()
