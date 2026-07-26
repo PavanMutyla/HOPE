@@ -215,3 +215,24 @@ def test_context_keep_recent_default(fake_env):
     from settings import Settings
     s = Settings(_env_file=None)
     assert s.context_keep_recent == 6
+
+
+@pytest.mark.unit
+def test_episodic_db_path_default(fake_env):
+    from settings import Settings
+    s = Settings(_env_file=None)
+    assert s.episodic_db_path == "data_store/episodic_memory/episodic.db"
+
+
+@pytest.mark.unit
+def test_episodic_media_dir_default(fake_env):
+    from settings import Settings
+    s = Settings(_env_file=None)
+    assert s.episodic_media_dir == "data_store/episodic_memory/media"
+
+
+@pytest.mark.unit
+def test_chroma_persist_dir_default(fake_env):
+    from settings import Settings
+    s = Settings(_env_file=None)
+    assert s.chroma_persist_dir == "data_store/episodic_memory/chroma"

@@ -1,0 +1,65 @@
+"""EpisodicMemory facade — the single entry point callers use to persist and
+retrieve episodic entries. Wires episodic.py (SQLite, source of truth for
+raw/multimodal content) and vector_store.py (Chroma, semantic index over
+summaries) together. See docs/HOPE_Episodic_Storage_Design.md.
+
+sqlite3 and chromadb calls here are synchronous/blocking. The intended caller
+is ContextSummarizer's fire-and-forget fold task (core/voice/summarizer.py),
+which should offload `write()` via `asyncio.to_thread` so a slow embed/DB
+write never blocks the pipeline — that wiring is done at the call site, not
+inside this class.
+"""
+
+from pathlib import Path
+from typing import Any
+
+from memory.episodic_memory import episodic
+from memory.episodic_memory.schema import Episode
+from memory.episodic_memory.vector_store import EpisodicVectorStore
+from settings import settings
+
+
+class EpisodicMemory:
+    def __init__(
+        self,
+        db_path: str | Path | None = None,
+        media_dir: str | Path | None = None,
+        persist_dir: str | Path | None = None,
+        embedding_function: Any = None,
+    ):
+        self._media_dir = Path(media_dir or settings.episodic_media_dir)
+        self._conn = episodic.connect(db_path or settings.episodic_db_path)
+        self._vectors = EpisodicVectorStore(
+            persist_dir or settings.chroma_persist_dir,
+            embedding_function=embedding_function,
+        )
+
+    def write(
+        self,
+        agent: str,
+        session_id: str,
+        reason: str,
+        span_turns: int,
+        summary: str,
+        messages: list[dict],
+    ) -> str:
+        episode_id = episodic.create_episode(
+            self._conn,
+            self._media_dir,
+            agent,
+            session_id,
+            reason,
+            span_turns,
+            summary,
+            messages,
+        )
+        self._vectors.upsert(episode_id, summary, {"agent": agent, "reason": reason})
+        return episode_id
+
+    def query(self, text: str, k: int = 5) -> list[Episode]:
+        episode_ids = self._vectors.query(text, k)
+        episodes = (episodic.get_episode(self._conn, episode_id) for episode_id in episode_ids)
+        return [episode for episode in episodes if episode is not None]
+
+    def close(self) -> None:
+        self._conn.close()

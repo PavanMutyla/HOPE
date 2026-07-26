@@ -9,8 +9,10 @@ from pipecat.frames.frames import MetricsFrame
 from pipecat.metrics.metrics import LLMUsageMetricsData, TTFBMetricsData
 from pipecat.processors.frame_processor import FrameProcessor, FrameDirection
 
+from core.voice.agent_state import agent_state
 from core.voice.context_meter import ContextMeter
 from core.status import StatusPanel
+from memory.episodic_memory.store import EpisodicMemory
 from settings import settings
 
 SUMMARY_MAX_CONTEXT_PCT = 0.2  # summary output caps at 20% of the model's context window
@@ -88,12 +90,22 @@ class ContextSummarizer(FrameProcessor):
     the threshold, summarizes older turns in a background task and rewrites
     the live context. Never blocks the frame pipeline."""
 
-    def __init__(self, context, meter: ContextMeter, panel: StatusPanel, client):
+    def __init__(
+        self,
+        context,
+        meter: ContextMeter,
+        panel: StatusPanel,
+        client,
+        episodic_memory: EpisodicMemory,
+        session_id: str,
+    ):
         super().__init__()
         self._context = context
         self._meter = meter
         self._panel = panel
         self._client = client
+        self._episodic_memory = episodic_memory
+        self._session_id = session_id
         self._keep_recent = settings.context_keep_recent
         self._summary_task: asyncio.Task | None = None
 
@@ -142,6 +154,27 @@ class ContextSummarizer(FrameProcessor):
             )
         except Exception:
             logger.exception("Context summarization failed — continuing unsummarized")
+            return
+
+        await self._write_episodic(head, summary)
+
+    async def _write_episodic(self, head: list[dict], summary: str) -> None:
+        """Best-effort persistence of the fold just performed above. Runs in a
+        thread since sqlite3/chromadb are blocking calls — failure here must
+        never undo or be confused with the summarization that already
+        succeeded, hence the separate try/except from _summarize()'s own."""
+        try:
+            await asyncio.to_thread(
+                self._episodic_memory.write,
+                agent=agent_state.active,
+                session_id=self._session_id,
+                reason="threshold",
+                span_turns=len(head),
+                summary=summary,
+                messages=head,
+            )
+        except Exception:
+            logger.exception("Episodic memory write failed — continuing without persistence")
 
     async def process_frame(self, frame, direction: FrameDirection):
         await super().process_frame(frame, direction)

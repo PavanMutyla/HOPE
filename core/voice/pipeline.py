@@ -1,3 +1,4 @@
+import uuid
 from dataclasses import dataclass
 
 from pipecat.adapters.schemas.function_schema import FunctionSchema
@@ -25,6 +26,7 @@ from core.voice.context_meter import ContextMeter, resolve_context_limit
 from core.voice.summarizer import ContextSummarizer
 from core.observability import LangfuseObserver, LangfuseTracer
 from core.status import StatusMonitor, StatusPanel
+from memory.episodic_memory.store import EpisodicMemory
 from settings import settings
 
 
@@ -39,6 +41,7 @@ class VoicePipelineBundle:
     panel: StatusPanel
     tracer: LangfuseTracer
     meter: ContextMeter
+    episodic_memory: EpisodicMemory
 
 
 def build_pipeline(agent: VoiceAgent, tools: list[FunctionSchema]) -> VoicePipelineBundle:
@@ -107,11 +110,14 @@ def build_pipeline(agent: VoiceAgent, tools: list[FunctionSchema]) -> VoicePipel
         ),
         threshold=settings.context_summarize_threshold,
     )
+    episodic_memory = EpisodicMemory()
     summarizer = ContextSummarizer(
         context=context,
         meter=meter,
         panel=panel,
         client=AsyncOpenAI(api_key=settings.openai_api_key),
+        episodic_memory=episodic_memory,
+        session_id=str(uuid.uuid4()),
     )
 
     pipeline = Pipeline([
@@ -144,4 +150,5 @@ def build_pipeline(agent: VoiceAgent, tools: list[FunctionSchema]) -> VoicePipel
         panel=panel,
         tracer=tracer,
         meter=meter,
+        episodic_memory=episodic_memory,
     )

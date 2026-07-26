@@ -5,6 +5,7 @@ Every fixture here uses fakes/mocks so the full suite runs
 without real API keys, audio hardware, or network access.
 """
 
+import hashlib
 import os
 from unittest.mock import AsyncMock, MagicMock
 
@@ -139,6 +140,7 @@ def pipeline_mocks(monkeypatch):
         "StatusMonitor",
         "ContextSummarizer",
         "AsyncOpenAI",
+        "EpisodicMemory",
     ]}
 
     for name, mock in mocks.items():
@@ -156,3 +158,53 @@ def mock_orchestrator(agent_registry, mock_pipeline_bundle, monkeypatch):
     monkeypatch.setattr(om, "AsyncOpenAI", MagicMock())
     from core.voice.orchestrator import VoiceOrchestrator
     return VoiceOrchestrator(agent_registry, mock_pipeline_bundle)
+
+
+# ─── Episodic memory fixtures ────────────────────────────────────
+
+@pytest.fixture
+def fake_embedding_function():
+    """Deterministic, offline stand-in for Chroma's default embedding model —
+    keeps episodic-memory tests fast and network-free instead of downloading/
+    running a real ONNX model. Must subclass chromadb.EmbeddingFunction (not
+    just duck-type __call__) to inherit the default embed_query() Chroma's
+    query path requires.
+
+    Bag-of-words hashing (not a length/checksum scalar pair): each word hashes
+    into one of 256 buckets and increments a count, so texts with genuinely
+    different vocabulary land in genuinely different vectors. A cruder fake
+    (e.g. keyed only on text length, or too few buckets) collides too easily
+    and makes nearest-neighbor assertions in tests flaky/wrong. Uses
+    hashlib (not the builtin `hash()`, which is salted per-process) so the
+    same word always maps to the same bucket across separate test runs.
+    """
+    chromadb = pytest.importorskip("chromadb")
+
+    class FakeEmbeddingFunction(chromadb.EmbeddingFunction):
+        _DIMENSIONS = 256
+
+        def __init__(self):
+            pass
+
+        def __call__(self, input):
+            vectors = []
+            for text in input:
+                vector = [0.0] * self._DIMENSIONS
+                for word in text.lower().split():
+                    bucket = int(hashlib.sha256(word.encode()).hexdigest(), 16) % self._DIMENSIONS
+                    vector[bucket] += 1.0
+                vectors.append(vector)
+            return vectors
+
+        @staticmethod
+        def name():
+            return "fake-embedding-function"
+
+        def get_config(self):
+            return {}
+
+        @staticmethod
+        def build_from_config(config):
+            return FakeEmbeddingFunction()
+
+    return FakeEmbeddingFunction()

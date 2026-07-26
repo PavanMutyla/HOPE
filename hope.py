@@ -45,6 +45,7 @@ async def main():
     finally:
         bundle.panel.stop()
         bundle.tracer.shutdown()
+        bundle.episodic_memory.close()
 
 
 if __name__ == "__main__":

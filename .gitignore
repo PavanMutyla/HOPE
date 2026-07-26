@@ -10,3 +10,4 @@ dist/
 
 .env.example
 .claude/settings.local.json
+data_store/

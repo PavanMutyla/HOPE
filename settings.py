@@ -24,6 +24,9 @@ class Settings(BaseSettings):
     context_summarize_threshold: float = 0.9
     context_keep_recent: int = 6
     summarizer_model: str = "gpt-4o-mini"  # OpenAI model used to compress context
+    episodic_db_path: str = "data_store/episodic_memory/episodic.db"
+    episodic_media_dir: str = "data_store/episodic_memory/media"
+    chroma_persist_dir: str = "data_store/episodic_memory/chroma"
 
 
 settings = Settings()

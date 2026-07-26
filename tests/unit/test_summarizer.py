@@ -9,6 +9,7 @@ from pipecat.frames.frames import MetricsFrame, TextFrame
 from pipecat.metrics.metrics import LLMTokenUsage, LLMUsageMetricsData, TTFBMetricsData
 from pipecat.processors.frame_processor import FrameDirection
 
+from core.voice.agent_state import agent_state
 from core.voice.context_meter import ContextMeter
 from core.voice.summarizer import (
     ContextSummarizer,
@@ -135,13 +136,21 @@ def make_context(messages: list[dict]) -> MagicMock:
     return context
 
 
+def make_episodic_memory() -> MagicMock:
+    return MagicMock()
+
+
+TEST_SESSION_ID = "test-session"
+
+
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_metrics_update_meter_and_panel():
     meter = ContextMeter(context_limit=1000)
     panel = MagicMock()
     summarizer = ContextSummarizer(
-        context=make_context([]), meter=meter, panel=panel, client=make_openai_client()
+        context=make_context([]), meter=meter, panel=panel, client=make_openai_client(),
+        episodic_memory=make_episodic_memory(), session_id=TEST_SESSION_ID,
     )
     summarizer._handle_metrics(make_usage_frame(100, 20))
     assert meter.last_prompt_tokens == 100
@@ -154,7 +163,8 @@ async def test_below_threshold_does_not_summarize():
     meter = ContextMeter(context_limit=1000)
     client = make_openai_client()
     summarizer = ContextSummarizer(
-        context=make_context([]), meter=meter, panel=MagicMock(), client=client
+        context=make_context([]), meter=meter, panel=MagicMock(), client=client,
+        episodic_memory=make_episodic_memory(), session_id=TEST_SESSION_ID,
     )
     summarizer._handle_metrics(make_usage_frame(100, 20))
     assert summarizer._summary_task is None
@@ -171,7 +181,10 @@ async def test_at_threshold_summarizes_and_rewrites_context():
     meter = ContextMeter(context_limit=1000)
     client = make_openai_client("compressed history")
     context = make_context(messages)
-    summarizer = ContextSummarizer(context=context, meter=meter, panel=MagicMock(), client=client)
+    summarizer = ContextSummarizer(
+        context=context, meter=meter, panel=MagicMock(), client=client,
+        episodic_memory=make_episodic_memory(), session_id=TEST_SESSION_ID,
+    )
     summarizer._keep_recent = 4
 
     summarizer._handle_metrics(make_usage_frame(900, 50))
@@ -185,6 +198,84 @@ async def test_at_threshold_summarizes_and_rewrites_context():
     assert messages[1]["role"] == "developer"
     assert "compressed history" in messages[1]["content"]
     assert [m["content"] for m in messages[2:]] == ["m6", "m7", "m8", "m9"]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_successful_summarize_writes_episodic_memory():
+    messages = [
+        {"role": "system", "content": "sys"},
+        *[{"role": "user" if i % 2 == 0 else "assistant", "content": f"m{i}"} for i in range(10)],
+    ]
+    expected_head = messages[1:7]  # captured before summarization mutates `messages` in place
+    meter = ContextMeter(context_limit=1000)
+    client = make_openai_client("compressed history")
+    context = make_context(messages)
+    episodic_memory = make_episodic_memory()
+    summarizer = ContextSummarizer(
+        context=context, meter=meter, panel=MagicMock(), client=client,
+        episodic_memory=episodic_memory, session_id=TEST_SESSION_ID,
+    )
+    summarizer._keep_recent = 4
+
+    summarizer._handle_metrics(make_usage_frame(900, 50))
+    await summarizer._summary_task
+
+    episodic_memory.write.assert_called_once_with(
+        agent=agent_state.active,
+        session_id=TEST_SESSION_ID,
+        reason="threshold",
+        span_turns=6,  # len(expected_head) — folded head, before the keep_recent=4 tail
+        summary="compressed history",
+        messages=expected_head,
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_failed_summarize_does_not_write_episodic_memory():
+    messages = [
+        {"role": "system", "content": "sys"},
+        *[{"role": "user" if i % 2 == 0 else "assistant", "content": f"m{i}"} for i in range(10)],
+    ]
+    meter = ContextMeter(context_limit=1000)
+    client = make_openai_client()
+    client.chat.completions.create = AsyncMock(side_effect=RuntimeError("boom"))
+    episodic_memory = make_episodic_memory()
+    summarizer = ContextSummarizer(
+        context=make_context(messages), meter=meter, panel=MagicMock(), client=client,
+        episodic_memory=episodic_memory, session_id=TEST_SESSION_ID,
+    )
+    summarizer._keep_recent = 4
+
+    summarizer._handle_metrics(make_usage_frame(900, 50))
+    await summarizer._summary_task
+
+    episodic_memory.write.assert_not_called()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_episodic_write_failure_does_not_raise_or_undo_summarization():
+    messages = [
+        {"role": "system", "content": "sys"},
+        *[{"role": "user" if i % 2 == 0 else "assistant", "content": f"m{i}"} for i in range(10)],
+    ]
+    meter = ContextMeter(context_limit=1000)
+    client = make_openai_client("compressed history")
+    episodic_memory = MagicMock()
+    episodic_memory.write.side_effect = RuntimeError("db is on fire")
+    summarizer = ContextSummarizer(
+        context=make_context(messages), meter=meter, panel=MagicMock(), client=client,
+        episodic_memory=episodic_memory, session_id=TEST_SESSION_ID,
+    )
+    summarizer._keep_recent = 4
+
+    summarizer._handle_metrics(make_usage_frame(900, 50))
+    await summarizer._summary_task  # must not raise despite the episodic write failing
+
+    assert messages[1]["role"] == "developer"
+    assert "compressed history" in messages[1]["content"]
 
 
 @pytest.mark.unit
@@ -207,7 +298,10 @@ async def test_messages_added_during_summarization_survive():
         return response
 
     client.chat.completions.create = AsyncMock(side_effect=slow_create)
-    summarizer = ContextSummarizer(context=context, meter=meter, panel=MagicMock(), client=client)
+    summarizer = ContextSummarizer(
+        context=context, meter=meter, panel=MagicMock(), client=client,
+        episodic_memory=make_episodic_memory(), session_id=TEST_SESSION_ID,
+    )
     summarizer._keep_recent = 4
 
     summarizer._handle_metrics(make_usage_frame(900, 50))
@@ -237,7 +331,10 @@ async def test_agent_switch_during_summarization_is_not_reverted():
         return response
 
     client.chat.completions.create = AsyncMock(side_effect=slow_create)
-    summarizer = ContextSummarizer(context=context, meter=meter, panel=MagicMock(), client=client)
+    summarizer = ContextSummarizer(
+        context=context, meter=meter, panel=MagicMock(), client=client,
+        episodic_memory=make_episodic_memory(), session_id=TEST_SESSION_ID,
+    )
     summarizer._keep_recent = 4
 
     summarizer._handle_metrics(make_usage_frame(900, 50))
@@ -268,7 +365,8 @@ async def test_no_double_fire_while_task_running():
 
     client.chat.completions.create = AsyncMock(side_effect=blocked_create)
     summarizer = ContextSummarizer(
-        context=make_context(messages), meter=meter, panel=MagicMock(), client=client
+        context=make_context(messages), meter=meter, panel=MagicMock(), client=client,
+        episodic_memory=make_episodic_memory(), session_id=TEST_SESSION_ID,
     )
     summarizer._keep_recent = 4
 
@@ -295,7 +393,10 @@ async def test_summarize_failure_recovers_and_retries():
         side_effect=[RuntimeError("boom"), client.chat.completions.create.return_value]
     )
     context = make_context(messages)
-    summarizer = ContextSummarizer(context=context, meter=meter, panel=MagicMock(), client=client)
+    summarizer = ContextSummarizer(
+        context=context, meter=meter, panel=MagicMock(), client=client,
+        episodic_memory=make_episodic_memory(), session_id=TEST_SESSION_ID,
+    )
     summarizer._keep_recent = 4
 
     snapshot = list(messages)
@@ -322,7 +423,8 @@ async def test_ttfb_metrics_recorded_without_usage_update():
     meter = ContextMeter(context_limit=1000)
     panel = MagicMock()
     summarizer = ContextSummarizer(
-        context=make_context([]), meter=meter, panel=panel, client=make_openai_client()
+        context=make_context([]), meter=meter, panel=panel, client=make_openai_client(),
+        episodic_memory=make_episodic_memory(), session_id=TEST_SESSION_ID,
     )
     frame = MetricsFrame(data=[TTFBMetricsData(processor="llm", value=0.37)])
 
@@ -348,7 +450,8 @@ async def test_process_frame_pushes_all_frames_through():
     panel = MagicMock()
     client = make_openai_client()
     summarizer = ContextSummarizer(
-        context=make_context([]), meter=meter, panel=panel, client=client
+        context=make_context([]), meter=meter, panel=panel, client=client,
+        episodic_memory=make_episodic_memory(), session_id=TEST_SESSION_ID,
     )
     summarizer.push_frame = AsyncMock()
     summarizer._handle_metrics = MagicMock(wraps=summarizer._handle_metrics)

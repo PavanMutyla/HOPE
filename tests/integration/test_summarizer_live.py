@@ -66,7 +66,8 @@ async def test_live_summarization_compresses_and_preserves_facts():
     client = AsyncOpenAI(api_key=_key)
 
     summarizer = ContextSummarizer(
-        context=context, meter=meter, panel=MagicMock(), client=client
+        context=context, meter=meter, panel=MagicMock(), client=client,
+        episodic_memory=MagicMock(), session_id="live-test-session",
     )
     summarizer._keep_recent = 2
 
