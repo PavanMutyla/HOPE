@@ -56,8 +56,8 @@ class EpisodicMemory:
         self._vectors.upsert(episode_id, summary, {"agent": agent, "reason": reason})
         return episode_id
 
-    def query(self, text: str, k: int = 5) -> list[Episode]:
-        episode_ids = self._vectors.query(text, k)
+    def query(self, text: str, k: int = 5, agent: str | None = None) -> list[Episode]:
+        episode_ids = self._vectors.query(text, k, agent=agent)
         episodes = (episodic.get_episode(self._conn, episode_id) for episode_id in episode_ids)
         return [episode for episode in episodes if episode is not None]
 

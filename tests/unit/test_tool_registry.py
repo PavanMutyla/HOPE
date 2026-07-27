@@ -6,18 +6,19 @@ from tools.registry import (
     connect_to_atlas_schema,
     delegate_to_atlas_schema,
     handback_to_hope_schema,
+    recall_memory_schema,
 )
 
 
 @pytest.mark.unit
-def test_all_schemas_contains_exactly_three_tools():
-    assert len(ALL_SCHEMAS) == 3
+def test_all_schemas_contains_exactly_four_tools():
+    assert len(ALL_SCHEMAS) == 4
 
 
 @pytest.mark.unit
 def test_all_schemas_names_are_correct():
     names = {s.name for s in ALL_SCHEMAS}
-    assert names == {"delegate_to_atlas", "connect_to_atlas", "handback_to_hope"}
+    assert names == {"delegate_to_atlas", "connect_to_atlas", "handback_to_hope", "recall_memory"}
 
 
 @pytest.mark.unit
@@ -72,3 +73,20 @@ def test_connect_schema_description_mentions_atlas():
 @pytest.mark.unit
 def test_handback_schema_description_mentions_hope():
     assert "HOPE" in handback_to_hope_schema.description
+
+
+@pytest.mark.unit
+def test_recall_memory_schema_has_query_property():
+    assert "query" in recall_memory_schema.properties
+    assert recall_memory_schema.properties["query"]["type"] == "string"
+
+
+@pytest.mark.unit
+def test_recall_memory_schema_requires_only_query():
+    assert recall_memory_schema.required == ["query"]
+
+
+@pytest.mark.unit
+def test_recall_memory_schema_has_optional_agent_name_property():
+    assert "agent_name" in recall_memory_schema.properties
+    assert "agent_name" not in recall_memory_schema.required

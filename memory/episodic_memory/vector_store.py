@@ -34,7 +34,8 @@ class EpisodicVectorStore:
     def upsert(self, episode_id: str, summary: str, metadata: dict) -> None:
         self._collection.upsert(ids=[episode_id], documents=[summary], metadatas=[metadata])
 
-    def query(self, text: str, k: int = 5) -> list[str]:
-        result = self._collection.query(query_texts=[text], n_results=k)
+    def query(self, text: str, k: int = 5, agent: str | None = None) -> list[str]:
+        where = {"agent": agent} if agent else None
+        result = self._collection.query(query_texts=[text], n_results=k, where=where)
         ids = result.get("ids") or [[]]
         return ids[0]

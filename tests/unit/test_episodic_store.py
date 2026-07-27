@@ -57,3 +57,52 @@ def test_query_hydrates_full_episode_from_summary_match(memory):
 @pytest.mark.unit
 def test_query_with_no_matching_data_returns_empty_list(memory):
     assert memory.query("nothing has been written yet", k=5) == []
+
+
+@pytest.mark.unit
+def test_query_with_agent_only_returns_that_agents_episodes(memory):
+    memory.write(
+        agent="hope",
+        session_id="sess-1",
+        reason="threshold",
+        span_turns=1,
+        summary="a conversation about deployment steps",
+        messages=[{"role": "user", "content": "how do I deploy this?"}],
+    )
+    memory.write(
+        agent="atlas",
+        session_id="sess-1",
+        reason="threshold",
+        span_turns=1,
+        summary="a conversation about deployment steps",
+        messages=[{"role": "user", "content": "deploy the atlas workspace"}],
+    )
+
+    results = memory.query("deployment steps", k=5, agent="hope")
+
+    assert len(results) == 1
+    assert results[0].agent == "hope"
+
+
+@pytest.mark.unit
+def test_query_without_agent_returns_episodes_from_any_agent(memory):
+    memory.write(
+        agent="hope",
+        session_id="sess-1",
+        reason="threshold",
+        span_turns=1,
+        summary="a conversation about deployment steps",
+        messages=[{"role": "user", "content": "how do I deploy this?"}],
+    )
+    memory.write(
+        agent="atlas",
+        session_id="sess-1",
+        reason="threshold",
+        span_turns=1,
+        summary="a conversation about deployment steps",
+        messages=[{"role": "user", "content": "deploy the atlas workspace"}],
+    )
+
+    results = memory.query("deployment steps", k=5)
+
+    assert {e.agent for e in results} == {"hope", "atlas"}
