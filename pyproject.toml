@@ -16,6 +16,8 @@ langfuse = "^4.7.1"
 aiofiles = "^25.1.0"
 send2trash = "^2.1.0"
 litellm = "^1.92.0"
+chromadb = "^1.5.0"
+python-ulid = "^3.1.0"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "9.0.3"
