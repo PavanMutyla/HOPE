@@ -85,6 +85,28 @@ def test_query_with_agent_only_returns_that_agents_episodes(memory):
 
 
 @pytest.mark.unit
+def test_write_works_from_a_different_thread_than_construction(memory):
+    """Regression test: every real write path (ContextSummarizer, Atlas) calls
+    EpisodicMemory.write via asyncio.to_thread, so the connection is created
+    on one thread and used from another. sqlite3 forbids this unless
+    check_same_thread=False was passed at connect() time (episodic.py)."""
+    import concurrent.futures
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        episode_id = pool.submit(
+            memory.write,
+            agent="hope",
+            session_id="sess-1",
+            reason="threshold",
+            span_turns=1,
+            summary="cross-thread write",
+            messages=[{"role": "user", "content": "hello from another thread"}],
+        ).result()
+
+    assert episode_id.startswith("ep_")
+
+
+@pytest.mark.unit
 def test_query_without_agent_returns_episodes_from_any_agent(memory):
     memory.write(
         agent="hope",

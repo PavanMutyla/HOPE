@@ -39,11 +39,20 @@ def _apply_migrations(conn: sqlite3.Connection) -> None:
 
 
 def connect(db_path: Path) -> sqlite3.Connection:
+    """`check_same_thread=False` because every write goes through
+    `asyncio.to_thread` (see ContextSummarizer._write_episodic and
+    Atlas._write_episodic) — the connection is created on the event-loop
+    thread but used from whichever worker thread the executor picks, which
+    sqlite3 forbids by default. WAL + busy_timeout because the voice pipeline
+    and Atlas's background loop now hold independent connections to the same
+    file and can write concurrently."""
     db_path = Path(db_path)
     db_path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(db_path)
+    conn = sqlite3.connect(db_path, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute("PRAGMA journal_mode = WAL")
+    conn.execute("PRAGMA busy_timeout = 5000")
     _apply_migrations(conn)
     return conn
 
