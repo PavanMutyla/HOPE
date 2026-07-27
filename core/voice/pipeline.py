@@ -71,6 +71,7 @@ class VoicePipelineBundle:
     tracer: LangfuseTracer
     meter: ContextMeter
     episodic_memory: EpisodicMemory
+    summarizer: ContextSummarizer
 
 
 def build_pipeline(agent: VoiceAgent, tools: list[FunctionSchema]) -> VoicePipelineBundle:
@@ -177,4 +178,5 @@ def build_pipeline(agent: VoiceAgent, tools: list[FunctionSchema]) -> VoicePipel
         tracer=tracer,
         meter=meter,
         episodic_memory=episodic_memory,
+        summarizer=summarizer,
     )

@@ -11,7 +11,7 @@ CREATE TABLE IF NOT EXISTS episodes (
     ts            TEXT NOT NULL,
     session_id    TEXT NOT NULL,
     agent         TEXT NOT NULL,
-    reason        TEXT NOT NULL,      -- 'threshold' | 'session_end'
+    reason        TEXT NOT NULL,      -- 'threshold' | 'session_end_raw' | 'session_end'
     span_turns    INTEGER NOT NULL,
     summary       TEXT NOT NULL       -- embedding target; == raw text for a trivial-tail flush
 );

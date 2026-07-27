@@ -165,6 +165,25 @@ def _insert_media_part(
         )
 
 
+def list_episodes_by_reason(conn: sqlite3.Connection, reason: str) -> list[str]:
+    """Ids only, oldest first — mirrors vector_store.query()'s ids-only
+    convention; full hydration goes through get_episode()."""
+    rows = conn.execute(
+        "SELECT id FROM episodes WHERE reason = ? ORDER BY ts", (reason,)
+    ).fetchall()
+    return [row["id"] for row in rows]
+
+
+def update_episode_summary(
+    conn: sqlite3.Connection, episode_id: str, summary: str, reason: str
+) -> None:
+    with conn:
+        conn.execute(
+            "UPDATE episodes SET summary = ?, reason = ? WHERE id = ?",
+            (summary, reason, episode_id),
+        )
+
+
 def get_episode(conn: sqlite3.Connection, episode_id: str) -> Episode | None:
     """Hydrate one full episode — messages and their media parts, in order."""
     episode_row = conn.execute(

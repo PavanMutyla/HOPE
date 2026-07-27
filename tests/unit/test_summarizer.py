@@ -1,6 +1,7 @@
 """Unit tests for context summarization pure functions."""
 
 import asyncio
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -12,10 +13,12 @@ from pipecat.processors.frame_processor import FrameDirection
 from core.voice.agent_state import agent_state
 from core.voice.context_meter import ContextMeter
 from core.voice.summarizer import (
+    UNSUMMARIZED_MARKER,
     ContextSummarizer,
     build_summary_request,
     rebuild_context,
     split_for_summary,
+    upgrade_pending_episodes,
 )
 
 
@@ -466,3 +469,161 @@ async def test_process_frame_pushes_all_frames_through():
     summarizer.push_frame.assert_any_await(metrics_frame, FrameDirection.DOWNSTREAM)
     summarizer.push_frame.assert_any_await(other_frame, FrameDirection.DOWNSTREAM)
     summarizer._handle_metrics.assert_called_once_with(metrics_frame)
+
+
+# ─── flush() — session-close archive (Trigger B) ──────────────────
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_flush_writes_raw_archive_tagged_session_end_raw():
+    messages = [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "how do I deploy this?"},
+        {"role": "assistant", "content": "run the deploy script"},
+    ]
+    episodic_memory = make_episodic_memory()
+    summarizer = ContextSummarizer(
+        context=make_context(messages), meter=ContextMeter(context_limit=1000),
+        panel=MagicMock(), client=make_openai_client(),
+        episodic_memory=episodic_memory, session_id=TEST_SESSION_ID,
+    )
+
+    await summarizer.flush()
+
+    episodic_memory.write.assert_called_once()
+    call_kwargs = episodic_memory.write.call_args.kwargs
+    assert call_kwargs["agent"] == agent_state.active
+    assert call_kwargs["session_id"] == TEST_SESSION_ID
+    assert call_kwargs["reason"] == "session_end_raw"
+    assert call_kwargs["span_turns"] == 2
+    assert call_kwargs["messages"] == messages[1:]
+    assert call_kwargs["summary"].startswith(UNSUMMARIZED_MARKER)
+    assert "how do I deploy this?" in call_kwargs["summary"]
+    assert "run the deploy script" in call_kwargs["summary"]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_flush_with_nothing_but_system_message_does_not_write():
+    messages = [{"role": "system", "content": "sys"}]
+    episodic_memory = make_episodic_memory()
+    summarizer = ContextSummarizer(
+        context=make_context(messages), meter=ContextMeter(context_limit=1000),
+        panel=MagicMock(), client=make_openai_client(),
+        episodic_memory=episodic_memory, session_id=TEST_SESSION_ID,
+    )
+
+    await summarizer.flush()
+
+    episodic_memory.write.assert_not_called()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_flush_archives_everything_regardless_of_keep_recent():
+    messages = [
+        {"role": "system", "content": "sys"},
+        *[{"role": "user" if i % 2 == 0 else "assistant", "content": f"m{i}"} for i in range(10)],
+    ]
+    episodic_memory = make_episodic_memory()
+    summarizer = ContextSummarizer(
+        context=make_context(messages), meter=ContextMeter(context_limit=1000),
+        panel=MagicMock(), client=make_openai_client(),
+        episodic_memory=episodic_memory, session_id=TEST_SESSION_ID,
+    )
+    summarizer._keep_recent = 4  # must not limit what flush() archives
+
+    await summarizer.flush()
+
+    assert episodic_memory.write.call_args.kwargs["messages"] == messages[1:]
+    assert episodic_memory.write.call_args.kwargs["span_turns"] == 10
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_flush_never_calls_the_llm():
+    messages = [{"role": "system", "content": "sys"}, {"role": "user", "content": "hi"}]
+    client = make_openai_client()
+    summarizer = ContextSummarizer(
+        context=make_context(messages), meter=ContextMeter(context_limit=1000),
+        panel=MagicMock(), client=client,
+        episodic_memory=make_episodic_memory(), session_id=TEST_SESSION_ID,
+    )
+
+    await summarizer.flush()
+
+    client.chat.completions.create.assert_not_called()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_flush_failure_does_not_raise():
+    messages = [{"role": "system", "content": "sys"}, {"role": "user", "content": "hi"}]
+    episodic_memory = MagicMock()
+    episodic_memory.write.side_effect = RuntimeError("disk full")
+    summarizer = ContextSummarizer(
+        context=make_context(messages), meter=ContextMeter(context_limit=1000),
+        panel=MagicMock(), client=make_openai_client(),
+        episodic_memory=episodic_memory, session_id=TEST_SESSION_ID,
+    )
+
+    await summarizer.flush()  # must not raise
+
+
+# ─── upgrade_pending_episodes() — startup re-summarization pass ───
+
+
+def make_pending_episode(episode_id: str, agent: str = "hope") -> SimpleNamespace:
+    return SimpleNamespace(
+        id=episode_id,
+        agent=agent,
+        messages=[
+            SimpleNamespace(role="user", content_text="how do I deploy this?"),
+            SimpleNamespace(role="assistant", content_text="run the deploy script"),
+        ],
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_upgrade_pending_episodes_upgrades_each_one():
+    episodic_memory = MagicMock()
+    episodic_memory.list_by_reason.return_value = [make_pending_episode("ep_1")]
+    client = make_openai_client("a real summary")
+
+    await upgrade_pending_episodes(episodic_memory, client)
+
+    episodic_memory.list_by_reason.assert_called_once_with("session_end_raw")
+    episodic_memory.upgrade.assert_called_once_with("ep_1", "hope", "a real summary")
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_upgrade_pending_episodes_with_none_pending_does_nothing():
+    episodic_memory = MagicMock()
+    episodic_memory.list_by_reason.return_value = []
+    client = make_openai_client()
+
+    await upgrade_pending_episodes(episodic_memory, client)
+
+    client.chat.completions.create.assert_not_called()
+    episodic_memory.upgrade.assert_not_called()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_upgrade_pending_episodes_one_failure_does_not_block_the_rest():
+    episodic_memory = MagicMock()
+    episodic_memory.list_by_reason.return_value = [
+        make_pending_episode("ep_broken"),
+        make_pending_episode("ep_fine"),
+    ]
+    client = make_openai_client("a real summary")
+    client.chat.completions.create = AsyncMock(
+        side_effect=[RuntimeError("api down"), client.chat.completions.create.return_value]
+    )
+
+    await upgrade_pending_episodes(episodic_memory, client)  # must not raise
+
+    episodic_memory.upgrade.assert_called_once_with("ep_fine", "hope", "a real summary")

@@ -170,3 +170,51 @@ def test_multiple_episodes_are_independently_retrievable(conn, media_dir):
     assert id1 != id2
     assert episodic.get_episode(conn, id1).summary == "summary one"
     assert episodic.get_episode(conn, id2).summary == "summary two"
+
+
+@pytest.mark.unit
+def test_list_episodes_by_reason_returns_only_matching_episodes(conn, media_dir):
+    raw_id = episodic.create_episode(
+        conn, media_dir, "hope", "sess-1", "session_end_raw", 1, "raw",
+        [{"role": "user", "content": "a"}],
+    )
+    episodic.create_episode(
+        conn, media_dir, "hope", "sess-2", "threshold", 1, "folded",
+        [{"role": "user", "content": "b"}],
+    )
+
+    ids = episodic.list_episodes_by_reason(conn, "session_end_raw")
+
+    assert ids == [raw_id]
+
+
+@pytest.mark.unit
+def test_list_episodes_by_reason_with_no_matches_returns_empty(conn, media_dir):
+    assert episodic.list_episodes_by_reason(conn, "session_end_raw") == []
+
+
+@pytest.mark.unit
+def test_update_episode_summary_replaces_summary_and_reason(conn, media_dir):
+    episode_id = episodic.create_episode(
+        conn, media_dir, "hope", "sess-1", "session_end_raw", 1, "raw dump",
+        [{"role": "user", "content": "a"}],
+    )
+
+    episodic.update_episode_summary(conn, episode_id, "a real summary", "session_end")
+
+    episode = episodic.get_episode(conn, episode_id)
+    assert episode.summary == "a real summary"
+    assert episode.reason == "session_end"
+
+
+@pytest.mark.unit
+def test_update_episode_summary_leaves_messages_untouched(conn, media_dir):
+    episode_id = episodic.create_episode(
+        conn, media_dir, "hope", "sess-1", "session_end_raw", 2, "raw dump",
+        [{"role": "user", "content": "a"}, {"role": "assistant", "content": "b"}],
+    )
+
+    episodic.update_episode_summary(conn, episode_id, "a real summary", "session_end")
+
+    episode = episodic.get_episode(conn, episode_id)
+    assert [m.content_text for m in episode.messages] == ["a", "b"]

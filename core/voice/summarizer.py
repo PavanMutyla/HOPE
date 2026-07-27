@@ -17,6 +17,8 @@ from settings import settings
 
 SUMMARY_MAX_CONTEXT_PCT = 0.2  # summary output caps at 20% of the model's context window
 
+UNSUMMARIZED_MARKER = "[NOT SUMMARIZED YET — raw session tail, pending upgrade at next startup]"
+
 SUMMARY_SYSTEM_PROMPT = (
     "You compress conversation history for a voice assistant. Write a concise "
     "summary of the conversation below. Preserve: decisions made, facts stated, "
@@ -158,6 +160,32 @@ class ContextSummarizer(FrameProcessor):
 
         await self._write_episodic(head, summary)
 
+    async def flush(self) -> None:
+        """Fast, LLM-free archive of whatever's still live in context at
+        shutdown — without this, a session that never crossed the fold
+        threshold would be lost entirely when the process exits. Tagged
+        'session_end_raw'; upgrade_pending_episodes() below replaces it with
+        a real LLM summary at the next startup."""
+        snapshot = list(self._context.messages)
+        # keep_recent=0 -> split_for_summary puts the entire non-system
+        # conversation into `to_archive`; nothing is held back as "recent."
+        _, to_archive, _ = split_for_summary(snapshot, keep_recent=0)
+        if not to_archive:
+            return
+        try:
+            raw_text = "\n".join(_as_text(m) for m in to_archive)
+            await asyncio.to_thread(
+                self._episodic_memory.write,
+                agent=agent_state.active,
+                session_id=self._session_id,
+                reason="session_end_raw",
+                span_turns=len(to_archive),
+                summary=f"{UNSUMMARIZED_MARKER}\n{raw_text}",
+                messages=to_archive,
+            )
+        except Exception:
+            logger.exception("Session-close flush failed — conversation not persisted")
+
     async def _write_episodic(self, head: list[dict], summary: str) -> None:
         """Best-effort persistence of the fold just performed above. Runs in a
         thread since sqlite3/chromadb are blocking calls — failure here must
@@ -181,3 +209,26 @@ class ContextSummarizer(FrameProcessor):
         if isinstance(frame, MetricsFrame):
             self._handle_metrics(frame)
         await self.push_frame(frame, direction)
+
+
+async def upgrade_pending_episodes(episodic_memory: EpisodicMemory, client) -> None:
+    """Startup pass: replace every episode ContextSummarizer.flush() archived
+    raw at the end of a previous session (reason='session_end_raw') with a
+    real LLM summary, same summarization used for a normal threshold fold.
+
+    Self-healing: an episode that fails to upgrade (e.g. API unreachable)
+    just stays 'session_end_raw' and gets retried on the next startup — never
+    raises, since a memory-quality pass must never block HOPE from starting."""
+    pending = await asyncio.to_thread(episodic_memory.list_by_reason, "session_end_raw")
+    for episode in pending:
+        try:
+            raw_messages = [{"role": m.role, "content": m.content_text} for m in episode.messages]
+            response = await client.chat.completions.create(
+                model=settings.summarizer_model,
+                messages=build_summary_request(raw_messages),
+            )
+            summary = response.choices[0].message.content or ""
+            await asyncio.to_thread(episodic_memory.upgrade, episode.id, episode.agent, summary)
+            logger.info(f"Upgraded episode {episode.id} to a real summary")
+        except Exception:
+            logger.exception(f"Failed to upgrade episode {episode.id} — will retry next startup")

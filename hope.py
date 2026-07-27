@@ -1,6 +1,7 @@
 import asyncio
 
 from loguru import logger
+from openai import AsyncOpenAI
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.workers.runner import WorkerRunner
 
@@ -8,6 +9,7 @@ from sub_agents.atlas.agent import atlas_agent
 from core.voice.agent import AgentRegistry, VoiceAgent
 from core.voice.orchestrator import VoiceOrchestrator
 from core.voice.pipeline import build_pipeline
+from core.voice.summarizer import upgrade_pending_episodes
 from core.prompt import SYSTEM_PROMPT
 from settings import settings
 from tools.registry import ALL_SCHEMAS, setup as setup_tools
@@ -30,6 +32,10 @@ async def main():
 
     setup_tools(orchestrator)
 
+    asyncio.create_task(
+        upgrade_pending_episodes(bundle.episodic_memory, AsyncOpenAI(api_key=settings.openai_api_key))
+    )
+
     @bundle.worker.event_handler("on_pipeline_started")
     async def on_pipeline_started(worker, frame):
         logger.info("Pipeline started — queuing greeting")
@@ -45,6 +51,7 @@ async def main():
     finally:
         bundle.panel.stop()
         bundle.tracer.shutdown()
+        await bundle.summarizer.flush()
         bundle.episodic_memory.close()
 
 

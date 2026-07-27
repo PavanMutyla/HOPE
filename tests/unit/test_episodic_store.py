@@ -85,6 +85,51 @@ def test_query_with_agent_only_returns_that_agents_episodes(memory):
 
 
 @pytest.mark.unit
+def test_list_by_reason_returns_only_matching_episodes(memory):
+    memory.write(
+        agent="hope", session_id="sess-1", reason="session_end_raw", span_turns=1,
+        summary="raw dump", messages=[{"role": "user", "content": "hi"}],
+    )
+    memory.write(
+        agent="hope", session_id="sess-2", reason="threshold", span_turns=1,
+        summary="folded", messages=[{"role": "user", "content": "yo"}],
+    )
+
+    pending = memory.list_by_reason("session_end_raw")
+
+    assert len(pending) == 1
+    assert pending[0].summary == "raw dump"
+
+
+@pytest.mark.unit
+def test_upgrade_replaces_summary_and_is_findable_by_new_reason(memory):
+    episode_id = memory.write(
+        agent="hope", session_id="sess-1", reason="session_end_raw", span_turns=1,
+        summary="raw dump", messages=[{"role": "user", "content": "deployment talk"}],
+    )
+
+    memory.upgrade(episode_id, "hope", "a real summary about deployment", "session_end")
+
+    assert memory.list_by_reason("session_end_raw") == []
+    [upgraded] = memory.list_by_reason("session_end")
+    assert upgraded.summary == "a real summary about deployment"
+
+
+@pytest.mark.unit
+def test_upgrade_updates_the_vector_index_so_the_new_summary_is_searchable(memory):
+    episode_id = memory.write(
+        agent="hope", session_id="sess-1", reason="session_end_raw", span_turns=1,
+        summary="completely unrelated placeholder text",
+        messages=[{"role": "user", "content": "hi"}],
+    )
+
+    memory.upgrade(episode_id, "hope", "a chat about rocket engines", "session_end")
+
+    results = memory.query("rocket engines", k=5, agent="hope")
+    assert any(e.id == episode_id for e in results)
+
+
+@pytest.mark.unit
 def test_write_works_from_a_different_thread_than_construction(memory):
     """Regression test: every real write path (ContextSummarizer, Atlas) calls
     EpisodicMemory.write via asyncio.to_thread, so the connection is created

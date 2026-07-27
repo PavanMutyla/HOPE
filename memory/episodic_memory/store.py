@@ -61,5 +61,17 @@ class EpisodicMemory:
         episodes = (episodic.get_episode(self._conn, episode_id) for episode_id in episode_ids)
         return [episode for episode in episodes if episode is not None]
 
+    def list_by_reason(self, reason: str) -> list[Episode]:
+        episode_ids = episodic.list_episodes_by_reason(self._conn, reason)
+        episodes = (episodic.get_episode(self._conn, episode_id) for episode_id in episode_ids)
+        return [episode for episode in episodes if episode is not None]
+
+    def upgrade(self, episode_id: str, agent: str, summary: str, reason: str = "session_end") -> None:
+        """Replace a raw flush()-archived episode's summary with a real one,
+        in place. Idempotent — re-upserting the same episode_id updates the
+        existing vector rather than duplicating it."""
+        episodic.update_episode_summary(self._conn, episode_id, summary, reason)
+        self._vectors.upsert(episode_id, summary, {"agent": agent, "reason": reason})
+
     def close(self) -> None:
         self._conn.close()
