@@ -232,3 +232,25 @@ async def upgrade_pending_episodes(episodic_memory: EpisodicMemory, client) -> N
             logger.info(f"Upgraded episode {episode.id} to a real summary")
         except Exception:
             logger.exception(f"Failed to upgrade episode {episode.id} — will retry next startup")
+
+
+async def inject_warm_start(episodic_memory: EpisodicMemory, context, agent: str = "hope") -> None:
+    """Startup: if the last session for `agent` was cleanly closed and
+    summarized, inject that summary into the new session's opening context so
+    the conversation can pick up where it left off. Best-effort — a lookup
+    failure or a first-ever run (no prior session_end episode) must never
+    block startup, just skip the injection silently."""
+    try:
+        last_session = await asyncio.to_thread(episodic_memory.get_latest_by_reason, "session_end", agent)
+    except Exception:
+        logger.exception("Warm-start lookup failed — starting without prior-session context")
+        return
+    if last_session is None:
+        return
+    context.add_message({
+        "role": "developer",
+        "content": (
+            "Summary of your most recent session with Pavan (for context — "
+            f"don't repeat it verbatim): {last_session.summary}"
+        ),
+    })

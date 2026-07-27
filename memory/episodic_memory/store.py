@@ -66,6 +66,10 @@ class EpisodicMemory:
         episodes = (episodic.get_episode(self._conn, episode_id) for episode_id in episode_ids)
         return [episode for episode in episodes if episode is not None]
 
+    def get_latest_by_reason(self, reason: str, agent: str | None = None) -> Episode | None:
+        episode_id = episodic.get_latest_episode_by_reason(self._conn, reason, agent)
+        return episodic.get_episode(self._conn, episode_id) if episode_id else None
+
     def upgrade(self, episode_id: str, agent: str, summary: str, reason: str = "session_end") -> None:
         """Replace a raw flush()-archived episode's summary with a real one,
         in place. Idempotent — re-upserting the same episode_id updates the

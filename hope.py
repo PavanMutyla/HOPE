@@ -9,7 +9,7 @@ from sub_agents.atlas.agent import atlas_agent
 from core.voice.agent import AgentRegistry, VoiceAgent
 from core.voice.orchestrator import VoiceOrchestrator
 from core.voice.pipeline import build_pipeline
-from core.voice.summarizer import upgrade_pending_episodes
+from core.voice.summarizer import inject_warm_start, upgrade_pending_episodes
 from core.prompt import SYSTEM_PROMPT
 from settings import settings
 from tools.registry import ALL_SCHEMAS, setup as setup_tools
@@ -31,6 +31,8 @@ async def main():
     orchestrator = VoiceOrchestrator(registry, bundle)
 
     setup_tools(orchestrator)
+
+    await inject_warm_start(bundle.episodic_memory, bundle.context)
 
     asyncio.create_task(
         upgrade_pending_episodes(bundle.episodic_memory, AsyncOpenAI(api_key=settings.openai_api_key))

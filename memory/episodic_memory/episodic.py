@@ -174,6 +174,23 @@ def list_episodes_by_reason(conn: sqlite3.Connection, reason: str) -> list[str]:
     return [row["id"] for row in rows]
 
 
+def get_latest_episode_by_reason(
+    conn: sqlite3.Connection, reason: str, agent: str | None = None
+) -> str | None:
+    """Most recent episode id matching `reason` (and `agent`, if given), or
+    None. Used for session warm-start — the last cleanly-closed session."""
+    if agent is not None:
+        row = conn.execute(
+            "SELECT id FROM episodes WHERE reason = ? AND agent = ? ORDER BY ts DESC LIMIT 1",
+            (reason, agent),
+        ).fetchone()
+    else:
+        row = conn.execute(
+            "SELECT id FROM episodes WHERE reason = ? ORDER BY ts DESC LIMIT 1", (reason,)
+        ).fetchone()
+    return row["id"] if row else None
+
+
 def update_episode_summary(
     conn: sqlite3.Connection, episode_id: str, summary: str, reason: str
 ) -> None:

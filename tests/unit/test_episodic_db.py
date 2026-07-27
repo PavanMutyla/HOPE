@@ -194,6 +194,39 @@ def test_list_episodes_by_reason_with_no_matches_returns_empty(conn, media_dir):
 
 
 @pytest.mark.unit
+def test_get_latest_episode_by_reason_returns_the_most_recent(conn, media_dir):
+    episodic.create_episode(
+        conn, media_dir, "hope", "sess-1", "session_end", 1, "older",
+        [{"role": "user", "content": "a"}], ts="2026-01-01T00:00:00+00:00",
+    )
+    latest_id = episodic.create_episode(
+        conn, media_dir, "hope", "sess-2", "session_end", 1, "newer",
+        [{"role": "user", "content": "b"}], ts="2026-01-02T00:00:00+00:00",
+    )
+
+    assert episodic.get_latest_episode_by_reason(conn, "session_end") == latest_id
+
+
+@pytest.mark.unit
+def test_get_latest_episode_by_reason_filters_by_agent(conn, media_dir):
+    hope_id = episodic.create_episode(
+        conn, media_dir, "hope", "sess-1", "session_end", 1, "hope's",
+        [{"role": "user", "content": "a"}], ts="2026-01-01T00:00:00+00:00",
+    )
+    episodic.create_episode(
+        conn, media_dir, "atlas", "sess-2", "session_end", 1, "atlas's",
+        [{"role": "user", "content": "b"}], ts="2026-01-02T00:00:00+00:00",
+    )
+
+    assert episodic.get_latest_episode_by_reason(conn, "session_end", agent="hope") == hope_id
+
+
+@pytest.mark.unit
+def test_get_latest_episode_by_reason_with_no_match_returns_none(conn, media_dir):
+    assert episodic.get_latest_episode_by_reason(conn, "session_end") is None
+
+
+@pytest.mark.unit
 def test_update_episode_summary_replaces_summary_and_reason(conn, media_dir):
     episode_id = episodic.create_episode(
         conn, media_dir, "hope", "sess-1", "session_end_raw", 1, "raw dump",

@@ -16,6 +16,7 @@ from core.voice.summarizer import (
     UNSUMMARIZED_MARKER,
     ContextSummarizer,
     build_summary_request,
+    inject_warm_start,
     rebuild_context,
     split_for_summary,
     upgrade_pending_episodes,
@@ -627,3 +628,48 @@ async def test_upgrade_pending_episodes_one_failure_does_not_block_the_rest():
     await upgrade_pending_episodes(episodic_memory, client)  # must not raise
 
     episodic_memory.upgrade.assert_called_once_with("ep_fine", "hope", "a real summary")
+
+
+# ─── inject_warm_start() — session warm-start ─────────────────────
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_inject_warm_start_adds_last_session_summary_to_context():
+    episodic_memory = MagicMock()
+    episodic_memory.get_latest_by_reason.return_value = SimpleNamespace(
+        summary="Pavan and HOPE discussed the deployment pipeline."
+    )
+    context = MagicMock()
+
+    await inject_warm_start(episodic_memory, context, agent="hope")
+
+    episodic_memory.get_latest_by_reason.assert_called_once_with("session_end", "hope")
+    context.add_message.assert_called_once()
+    added = context.add_message.call_args[0][0]
+    assert added["role"] == "developer"
+    assert "Pavan and HOPE discussed the deployment pipeline." in added["content"]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_inject_warm_start_with_no_prior_session_does_nothing():
+    episodic_memory = MagicMock()
+    episodic_memory.get_latest_by_reason.return_value = None
+    context = MagicMock()
+
+    await inject_warm_start(episodic_memory, context, agent="hope")
+
+    context.add_message.assert_not_called()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_inject_warm_start_lookup_failure_does_not_raise_or_add_message():
+    episodic_memory = MagicMock()
+    episodic_memory.get_latest_by_reason.side_effect = RuntimeError("db is locked")
+    context = MagicMock()
+
+    await inject_warm_start(episodic_memory, context, agent="hope")  # must not raise
+
+    context.add_message.assert_not_called()

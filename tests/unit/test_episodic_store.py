@@ -130,6 +130,27 @@ def test_upgrade_updates_the_vector_index_so_the_new_summary_is_searchable(memor
 
 
 @pytest.mark.unit
+def test_get_latest_by_reason_returns_the_most_recent_episode(memory):
+    memory.write(
+        agent="hope", session_id="sess-1", reason="session_end", span_turns=1,
+        summary="older session", messages=[{"role": "user", "content": "a"}],
+    )
+    memory.write(
+        agent="hope", session_id="sess-2", reason="session_end", span_turns=1,
+        summary="newer session", messages=[{"role": "user", "content": "b"}],
+    )
+
+    latest = memory.get_latest_by_reason("session_end", agent="hope")
+
+    assert latest.summary == "newer session"
+
+
+@pytest.mark.unit
+def test_get_latest_by_reason_with_no_match_returns_none(memory):
+    assert memory.get_latest_by_reason("session_end", agent="hope") is None
+
+
+@pytest.mark.unit
 def test_write_works_from_a_different_thread_than_construction(memory):
     """Regression test: every real write path (ContextSummarizer, Atlas) calls
     EpisodicMemory.write via asyncio.to_thread, so the connection is created
