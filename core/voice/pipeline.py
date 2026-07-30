@@ -28,6 +28,7 @@ from core.voice.summarizer import ContextSummarizer
 from core.observability import LangfuseObserver, LangfuseTracer
 from core.status import StatusMonitor, StatusPanel
 from memory.episodic_memory.store import EpisodicMemory
+from memory.procedural_memory.store import ProceduralMemory
 from memory.semantic_memory.store import SemanticMemory
 from settings import settings
 
@@ -73,6 +74,7 @@ class VoicePipelineBundle:
     meter: ContextMeter
     episodic_memory: EpisodicMemory
     semantic_memory: SemanticMemory
+    procedural_memory: ProceduralMemory
     summarizer: ContextSummarizer
 
 
@@ -141,6 +143,7 @@ def build_pipeline(agent: VoiceAgent, tools: list[FunctionSchema]) -> VoicePipel
     )
     episodic_memory = EpisodicMemory()
     semantic_memory = SemanticMemory()
+    procedural_memory = ProceduralMemory()
     summarizer = ContextSummarizer(
         context=context,
         meter=meter,
@@ -183,5 +186,6 @@ def build_pipeline(agent: VoiceAgent, tools: list[FunctionSchema]) -> VoicePipel
         meter=meter,
         episodic_memory=episodic_memory,
         semantic_memory=semantic_memory,
+        procedural_memory=procedural_memory,
         summarizer=summarizer,
     )
