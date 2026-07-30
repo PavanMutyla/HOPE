@@ -18,6 +18,7 @@ send2trash = "^2.1.0"
 litellm = "^1.92.0"
 chromadb = "^1.5.0"
 python-ulid = "^3.1.0"
+mem0ai = "^2.0.14"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "9.0.3"

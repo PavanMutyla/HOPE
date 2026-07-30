@@ -13,6 +13,7 @@ from core.voice.agent_state import agent_state
 from core.voice.context_meter import ContextMeter
 from core.status import StatusPanel
 from memory.episodic_memory.store import EpisodicMemory
+from memory.semantic_memory.store import SemanticMemory
 from settings import settings
 
 SUMMARY_MAX_CONTEXT_PCT = 0.2  # summary output caps at 20% of the model's context window
@@ -100,6 +101,7 @@ class ContextSummarizer(FrameProcessor):
         client,
         episodic_memory: EpisodicMemory,
         session_id: str,
+        semantic_memory: SemanticMemory,
     ):
         super().__init__()
         self._context = context
@@ -108,6 +110,7 @@ class ContextSummarizer(FrameProcessor):
         self._client = client
         self._episodic_memory = episodic_memory
         self._session_id = session_id
+        self._semantic_memory = semantic_memory
         self._keep_recent = settings.context_keep_recent
         self._summary_task: asyncio.Task | None = None
 
@@ -159,13 +162,19 @@ class ContextSummarizer(FrameProcessor):
             return
 
         await self._write_episodic(head, summary)
+        await self._write_semantic(agent_state.active, summary)
 
     async def flush(self) -> None:
         """Fast, LLM-free archive of whatever's still live in context at
         shutdown — without this, a session that never crossed the fold
         threshold would be lost entirely when the process exits. Tagged
         'session_end_raw'; upgrade_pending_episodes() below replaces it with
-        a real LLM summary at the next startup."""
+        a real LLM summary at the next startup.
+
+        No semantic write here on purpose — this is deliberately LLM-free to
+        avoid blocking shutdown on an API call, and raw unsummarized text is
+        poor input for fact extraction anyway. Semantic write happens once
+        in upgrade_pending_episodes() instead, against the real summary."""
         snapshot = list(self._context.messages)
         # keep_recent=0 -> split_for_summary puts the entire non-system
         # conversation into `to_archive`; nothing is held back as "recent."
@@ -204,6 +213,16 @@ class ContextSummarizer(FrameProcessor):
         except Exception:
             logger.exception("Episodic memory write failed — continuing without persistence")
 
+    async def _write_semantic(self, agent: str, text: str) -> None:
+        """Best-effort fact extraction from the summary just written to
+        episodic memory. Separate try/except from _write_episodic — a
+        semantic-layer failure must never be confused with, or undo, the
+        episodic write that already succeeded."""
+        try:
+            await asyncio.to_thread(self._semantic_memory.add, agent=agent, text=text)
+        except Exception:
+            logger.exception("Semantic memory write failed — continuing without persistence")
+
     async def process_frame(self, frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
         if isinstance(frame, MetricsFrame):
@@ -211,10 +230,16 @@ class ContextSummarizer(FrameProcessor):
         await self.push_frame(frame, direction)
 
 
-async def upgrade_pending_episodes(episodic_memory: EpisodicMemory, client) -> None:
+async def upgrade_pending_episodes(
+    episodic_memory: EpisodicMemory, client, semantic_memory: SemanticMemory
+) -> None:
     """Startup pass: replace every episode ContextSummarizer.flush() archived
     raw at the end of a previous session (reason='session_end_raw') with a
     real LLM summary, same summarization used for a normal threshold fold.
+    Also the semantic-memory write point for session-end episodes — deferred
+    here rather than into flush() itself, since flush() is deliberately
+    LLM-free and this is the first point a real summary exists for
+    'session_end_raw' episodes.
 
     Self-healing: an episode that fails to upgrade (e.g. API unreachable)
     just stays 'session_end_raw' and gets retried on the next startup — never
@@ -232,6 +257,12 @@ async def upgrade_pending_episodes(episodic_memory: EpisodicMemory, client) -> N
             logger.info(f"Upgraded episode {episode.id} to a real summary")
         except Exception:
             logger.exception(f"Failed to upgrade episode {episode.id} — will retry next startup")
+            continue
+
+        try:
+            await asyncio.to_thread(semantic_memory.add, agent=episode.agent, text=summary)
+        except Exception:
+            logger.exception(f"Semantic memory write failed for episode {episode.id}")
 
 
 async def inject_warm_start(episodic_memory: EpisodicMemory, context, agent: str = "hope") -> None:

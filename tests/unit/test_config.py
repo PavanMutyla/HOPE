@@ -236,3 +236,17 @@ def test_chroma_persist_dir_default(fake_env):
     from settings import Settings
     s = Settings(_env_file=None)
     assert s.chroma_persist_dir == "data_store/episodic_memory/chroma"
+
+
+@pytest.mark.unit
+def test_semantic_persist_dir_default(fake_env):
+    from settings import Settings
+    s = Settings(_env_file=None)
+    assert s.semantic_persist_dir == "data_store/semantic_memory/chroma"
+
+
+@pytest.mark.unit
+def test_semantic_history_db_path_default(fake_env):
+    from settings import Settings
+    s = Settings(_env_file=None)
+    assert s.semantic_history_db_path == "data_store/semantic_memory/history.db"

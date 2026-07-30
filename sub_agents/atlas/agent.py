@@ -12,6 +12,7 @@ from sub_agents.atlas.voice_prompt import ATLAS_VOICE_PROMPT
 from sub_agents.atlas import tools as fs
 from core.voice.agent import VoiceAgent
 from memory.episodic_memory.store import EpisodicMemory
+from memory.semantic_memory.store import SemanticMemory
 from settings import settings
 
 _TOOL_DISPATCH: dict[str, Callable] = {
@@ -42,11 +43,16 @@ def _normalize_message(message: dict | object) -> dict:
 
 
 class Atlas:
-    def __init__(self, episodic_memory: EpisodicMemory | None = None) -> None:
+    def __init__(
+        self,
+        episodic_memory: EpisodicMemory | None = None,
+        semantic_memory: SemanticMemory | None = None,
+    ) -> None:
         self._client = AsyncOpenAI(api_key=settings.openai_api_key)
         self._workspace = Path(settings.atlas_workspace)
         self._busy = False
         self._episodic_memory = episodic_memory or EpisodicMemory()
+        self._semantic_memory = semantic_memory or SemanticMemory()
 
     async def run(self, task: str, result_callback: ResultCallback) -> None:
         if self._busy:
@@ -106,6 +112,7 @@ class Atlas:
         """Best-effort: one episode per completed task, tagged agent='atlas' in
         the same shared store the voice pipeline writes to. Failure here must
         never surface as a task failure to the caller."""
+        summary = f"Task: {task}\nResult: {result}"
         try:
             normalized = [_normalize_message(message) for message in messages]
             await asyncio.to_thread(
@@ -114,11 +121,16 @@ class Atlas:
                 session_id=str(uuid.uuid4()),
                 reason="task_complete",
                 span_turns=len(normalized),
-                summary=f"Task: {task}\nResult: {result}",
+                summary=summary,
                 messages=normalized,
             )
         except Exception:
             logger.exception("Atlas episodic memory write failed — continuing without persistence")
+
+        try:
+            await asyncio.to_thread(self._semantic_memory.add, agent="atlas", text=summary)
+        except Exception:
+            logger.exception("Atlas semantic memory write failed — continuing without persistence")
 
     async def _execute_tool(self, tool_call) -> str:
         name = tool_call.function.name

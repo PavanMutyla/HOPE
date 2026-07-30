@@ -28,6 +28,7 @@ from core.voice.summarizer import ContextSummarizer
 from core.observability import LangfuseObserver, LangfuseTracer
 from core.status import StatusMonitor, StatusPanel
 from memory.episodic_memory.store import EpisodicMemory
+from memory.semantic_memory.store import SemanticMemory
 from settings import settings
 
 
@@ -71,6 +72,7 @@ class VoicePipelineBundle:
     tracer: LangfuseTracer
     meter: ContextMeter
     episodic_memory: EpisodicMemory
+    semantic_memory: SemanticMemory
     summarizer: ContextSummarizer
 
 
@@ -138,6 +140,7 @@ def build_pipeline(agent: VoiceAgent, tools: list[FunctionSchema]) -> VoicePipel
         threshold=settings.context_summarize_threshold,
     )
     episodic_memory = EpisodicMemory()
+    semantic_memory = SemanticMemory()
     summarizer = ContextSummarizer(
         context=context,
         meter=meter,
@@ -145,6 +148,7 @@ def build_pipeline(agent: VoiceAgent, tools: list[FunctionSchema]) -> VoicePipel
         client=AsyncOpenAI(api_key=settings.openai_api_key),
         episodic_memory=episodic_memory,
         session_id=str(uuid.uuid4()),
+        semantic_memory=semantic_memory,
     )
 
     pipeline = Pipeline([
@@ -178,5 +182,6 @@ def build_pipeline(agent: VoiceAgent, tools: list[FunctionSchema]) -> VoicePipel
         tracer=tracer,
         meter=meter,
         episodic_memory=episodic_memory,
+        semantic_memory=semantic_memory,
         summarizer=summarizer,
     )

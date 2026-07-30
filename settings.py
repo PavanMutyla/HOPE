@@ -27,6 +27,8 @@ class Settings(BaseSettings):
     episodic_db_path: str = "data_store/episodic_memory/episodic.db"
     episodic_media_dir: str = "data_store/episodic_memory/media"
     chroma_persist_dir: str = "data_store/episodic_memory/chroma"
+    semantic_persist_dir: str = "data_store/semantic_memory/chroma"
+    semantic_history_db_path: str = "data_store/semantic_memory/history.db"
 
 
 settings = Settings()

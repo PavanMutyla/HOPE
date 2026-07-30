@@ -75,11 +75,35 @@ recall_memory_schema = FunctionSchema(
     required=["query"],
 )
 
+recall_semantic_schema = FunctionSchema(
+    name="recall_semantic",
+    description=(
+        "Search durable facts and preferences (not conversation history — use "
+        "recall_memory for that). Defaults to the shared pool everyone can see; "
+        "pass agent_name to see only one agent's private facts."
+    ),
+    properties={
+        "query": {
+            "type": "string",
+            "description": "Natural language description of what to recall.",
+        },
+        "agent_name": {
+            "type": "string",
+            "description": (
+                "Whose private facts to search: 'hope' or 'atlas'. "
+                "Omit to search the shared pool everyone can see."
+            ),
+        },
+    },
+    required=["query"],
+)
+
 ALL_SCHEMAS = [
     delegate_to_atlas_schema,
     connect_to_atlas_schema,
     handback_to_hope_schema,
     recall_memory_schema,
+    recall_semantic_schema,
 ]
 
 # ── Handlers ──────────────────────────────────────────────────────────────────
@@ -126,6 +150,26 @@ def _make_recall_memory_handler(orchestrator: "VoiceOrchestrator"):
     return handler
 
 
+def _make_recall_semantic_handler(orchestrator: "VoiceOrchestrator"):
+    async def handler(params: FunctionCallParams) -> None:
+        query = params.arguments["query"]
+        agent_name = params.arguments.get("agent_name")  # omitted -> shared pool, unlike recall_memory
+
+        facts = await asyncio.to_thread(
+            orchestrator.bundle.semantic_memory.query, query, 5, agent_name
+        )
+
+        if not facts:
+            await params.result_callback("No matching facts found.")
+            return
+
+        summary_text = "\n".join(
+            f"- ({fact.get('agent_id') or 'shared'}) {fact['memory']}" for fact in facts
+        )
+        await params.result_callback(summary_text)
+    return handler
+
+
 # ── Wiring ────────────────────────────────────────────────────────────────────
 
 def setup(orchestrator: "VoiceOrchestrator") -> None:
@@ -149,5 +193,10 @@ def setup(orchestrator: "VoiceOrchestrator") -> None:
     llm.register_function(
         "recall_memory",
         _make_recall_memory_handler(orchestrator),
+        cancel_on_interruption=False,
+    )
+    llm.register_function(
+        "recall_semantic",
+        _make_recall_semantic_handler(orchestrator),
         cancel_on_interruption=False,
     )

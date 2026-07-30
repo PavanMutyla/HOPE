@@ -35,7 +35,11 @@ async def main():
     await inject_warm_start(bundle.episodic_memory, bundle.context)
 
     asyncio.create_task(
-        upgrade_pending_episodes(bundle.episodic_memory, AsyncOpenAI(api_key=settings.openai_api_key))
+        upgrade_pending_episodes(
+            bundle.episodic_memory,
+            AsyncOpenAI(api_key=settings.openai_api_key),
+            bundle.semantic_memory,
+        )
     )
 
     @bundle.worker.event_handler("on_pipeline_started")
