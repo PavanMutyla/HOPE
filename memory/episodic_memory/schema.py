@@ -51,3 +51,19 @@ class Episode(BaseModel):
     span_turns: int
     summary: str
     messages: list[EpisodeMessage] = Field(default_factory=list)
+
+
+class Plan(BaseModel):
+    """Unlike Episode, this is mutated in place as it resolves — not an
+    immutable log entry. See migrations/0002_add_plans.sql."""
+
+    model_config = ConfigDict(strict=True, frozen=True)
+
+    id: str
+    agent: str
+    description: str
+    status: str  # 'pending' | 'completed' | 'abandoned' | 'superseded'
+    created_at: str
+    resolved_at: str | None = None
+    resulting_episode_id: str | None = None
+    superseded_by: str | None = None

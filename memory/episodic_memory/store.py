@@ -13,8 +13,8 @@ inside this class.
 from pathlib import Path
 from typing import Any
 
-from memory.episodic_memory import episodic
-from memory.episodic_memory.schema import Episode
+from memory.episodic_memory import episodic, plans
+from memory.episodic_memory.schema import Episode, Plan
 from memory.episodic_memory.vector_store import EpisodicVectorStore
 from settings import settings
 
@@ -79,3 +79,25 @@ class EpisodicMemory:
 
     def close(self) -> None:
         self._conn.close()
+
+    # ── Plan tracking ──────────────────────────────────────────────────
+    # A plan is written down when formed, before anything happens — unlike
+    # everything above, which only ever records what already occurred.
+
+    def create_plan(self, agent: str, description: str) -> str:
+        return plans.create_plan(self._conn, agent, description)
+
+    def resolve_plan(self, plan_id: str, resulting_episode_id: str) -> None:
+        plans.resolve_plan(self._conn, plan_id, resulting_episode_id)
+
+    def abandon_plan(self, plan_id: str) -> None:
+        plans.abandon_plan(self._conn, plan_id)
+
+    def supersede_plan(self, plan_id: str, superseded_by: str) -> None:
+        plans.supersede_plan(self._conn, plan_id, superseded_by)
+
+    def get_plan(self, plan_id: str) -> Plan | None:
+        return plans.get_plan(self._conn, plan_id)
+
+    def list_plans(self, agent: str | None = None, status: str | None = None) -> list[Plan]:
+        return plans.list_plans(self._conn, agent=agent, status=status)
