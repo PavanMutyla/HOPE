@@ -7,13 +7,16 @@ from tools.registry import (
     delegate_to_atlas_schema,
     handback_to_hope_schema,
     recall_memory_schema,
+    recall_procedure_schema,
     recall_semantic_schema,
+    record_procedure_outcome_schema,
+    save_procedure_schema,
 )
 
 
 @pytest.mark.unit
-def test_all_schemas_contains_exactly_five_tools():
-    assert len(ALL_SCHEMAS) == 5
+def test_all_schemas_contains_exactly_eight_tools():
+    assert len(ALL_SCHEMAS) == 8
 
 
 @pytest.mark.unit
@@ -25,6 +28,9 @@ def test_all_schemas_names_are_correct():
         "handback_to_hope",
         "recall_memory",
         "recall_semantic",
+        "save_procedure",
+        "recall_procedure",
+        "record_procedure_outcome",
     }
 
 
@@ -114,3 +120,36 @@ def test_recall_semantic_schema_requires_only_query():
 def test_recall_semantic_schema_has_optional_agent_name_property():
     assert "agent_name" in recall_semantic_schema.properties
     assert "agent_name" not in recall_semantic_schema.required
+
+
+@pytest.mark.unit
+def test_save_procedure_schema_requires_name_description_and_steps():
+    assert set(save_procedure_schema.required) == {"name", "description", "steps"}
+
+
+@pytest.mark.unit
+def test_save_procedure_schema_steps_is_string_array():
+    steps_property = save_procedure_schema.properties["steps"]
+    assert steps_property["type"] == "array"
+    assert steps_property["items"]["type"] == "string"
+
+
+@pytest.mark.unit
+def test_recall_procedure_schema_requires_only_query():
+    assert recall_procedure_schema.required == ["query"]
+
+
+@pytest.mark.unit
+def test_recall_procedure_schema_has_optional_agent_name_property():
+    assert "agent_name" in recall_procedure_schema.properties
+    assert "agent_name" not in recall_procedure_schema.required
+
+
+@pytest.mark.unit
+def test_record_procedure_outcome_schema_requires_name_and_success():
+    assert set(record_procedure_outcome_schema.required) == {"name", "success"}
+
+
+@pytest.mark.unit
+def test_record_procedure_outcome_schema_success_is_boolean():
+    assert record_procedure_outcome_schema.properties["success"]["type"] == "boolean"

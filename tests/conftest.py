@@ -147,6 +147,7 @@ def pipeline_mocks(monkeypatch):
         "AsyncOpenAI",
         "EpisodicMemory",
         "SemanticMemory",
+        "ProceduralMemory",
     ]}
 
     for name, mock in mocks.items():
