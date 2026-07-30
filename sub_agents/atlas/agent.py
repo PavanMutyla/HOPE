@@ -63,13 +63,19 @@ class Atlas:
 
         self._busy = True
         logger.info(f"Atlas starting task: {task}")
+        plan_id = await self._create_plan(task)
         try:
             result, messages = await self._run_loop(task)
         except Exception as exc:
             logger.exception(f"Atlas task failed: {exc}")
             result = f"Atlas ran into a problem: {exc}"
+            await self._abandon_plan(plan_id)
         else:
-            await self._write_episodic(task, result, messages)
+            episode_id = await self._write_episodic(task, result, messages)
+            if episode_id is not None:
+                await self._resolve_plan(plan_id, episode_id)
+            else:
+                await self._abandon_plan(plan_id)
         finally:
             self._busy = False
 
@@ -108,14 +114,17 @@ class Atlas:
 
             return choice.message.content or "Done.", messages
 
-    async def _write_episodic(self, task: str, result: str, messages: list[dict]) -> None:
+    async def _write_episodic(self, task: str, result: str, messages: list[dict]) -> str | None:
         """Best-effort: one episode per completed task, tagged agent='atlas' in
         the same shared store the voice pipeline writes to. Failure here must
-        never surface as a task failure to the caller."""
+        never surface as a task failure to the caller. Returns the new episode
+        id, or None if the write failed — the caller uses that to decide
+        whether the task's plan can be resolved or must be abandoned."""
         summary = f"Task: {task}\nResult: {result}"
+        episode_id = None
         try:
             normalized = [_normalize_message(message) for message in messages]
-            await asyncio.to_thread(
+            episode_id = await asyncio.to_thread(
                 self._episodic_memory.write,
                 agent="atlas",
                 session_id=str(uuid.uuid4()),
@@ -131,6 +140,35 @@ class Atlas:
             await asyncio.to_thread(self._semantic_memory.add, agent="atlas", text=summary)
         except Exception:
             logger.exception("Atlas semantic memory write failed — continuing without persistence")
+
+        return episode_id
+
+    async def _create_plan(self, task: str) -> str | None:
+        """Best-effort: records the intention before any work happens, so a
+        task that's abandoned or crashes still leaves a trace. Failure here
+        must never block the task itself — a plan is a nice-to-have record,
+        not a precondition for doing the work."""
+        try:
+            return await asyncio.to_thread(self._episodic_memory.create_plan, "atlas", task)
+        except Exception:
+            logger.exception("Atlas plan creation failed — continuing without a tracked plan")
+            return None
+
+    async def _resolve_plan(self, plan_id: str | None, episode_id: str) -> None:
+        if plan_id is None:
+            return
+        try:
+            await asyncio.to_thread(self._episodic_memory.resolve_plan, plan_id, episode_id)
+        except Exception:
+            logger.exception("Atlas plan resolution failed")
+
+    async def _abandon_plan(self, plan_id: str | None) -> None:
+        if plan_id is None:
+            return
+        try:
+            await asyncio.to_thread(self._episodic_memory.abandon_plan, plan_id)
+        except Exception:
+            logger.exception("Atlas plan abandonment failed")
 
     async def _execute_tool(self, tool_call) -> str:
         name = tool_call.function.name
