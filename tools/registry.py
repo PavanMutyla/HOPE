@@ -98,12 +98,82 @@ recall_semantic_schema = FunctionSchema(
     required=["query"],
 )
 
+save_procedure_schema = FunctionSchema(
+    name="save_procedure",
+    description=(
+        "Save a reusable step-by-step procedure under your own name, so you can "
+        "follow it again later instead of figuring it out from scratch. Only call "
+        "this when Pavan explicitly confirms he wants something remembered as a "
+        "procedure — never save one unprompted."
+    ),
+    properties={
+        "name": {
+            "type": "string",
+            "description": "Short name for the procedure, e.g. 'restart audio service'.",
+        },
+        "description": {
+            "type": "string",
+            "description": "One-line description of when this procedure applies.",
+        },
+        "steps": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "Ordered list of steps that make up the procedure.",
+        },
+    },
+    required=["name", "description", "steps"],
+)
+
+recall_procedure_schema = FunctionSchema(
+    name="recall_procedure",
+    description=(
+        "Look up a saved procedure for a task you might have done before. "
+        "Defaults to your own saved procedures; pass agent_name to check a "
+        "specific agent's instead. Returns steps plus success/failure counts so "
+        "you can judge how much to trust it before following it."
+    ),
+    properties={
+        "query": {
+            "type": "string",
+            "description": "Natural language description of the task you're about to do.",
+        },
+        "agent_name": {
+            "type": "string",
+            "description": "Whose procedures to search: 'hope' or 'atlas'. Omit to search your own.",
+        },
+    },
+    required=["query"],
+)
+
+record_procedure_outcome_schema = FunctionSchema(
+    name="record_procedure_outcome",
+    description=(
+        "Report whether a procedure you just followed (via recall_procedure) "
+        "actually worked. Keeps its success/failure count accurate so future "
+        "recalls reflect how trustworthy it really is."
+    ),
+    properties={
+        "name": {
+            "type": "string",
+            "description": "Name of the procedure, as returned by recall_procedure.",
+        },
+        "success": {
+            "type": "boolean",
+            "description": "Whether following the procedure worked this time.",
+        },
+    },
+    required=["name", "success"],
+)
+
 ALL_SCHEMAS = [
     delegate_to_atlas_schema,
     connect_to_atlas_schema,
     handback_to_hope_schema,
     recall_memory_schema,
     recall_semantic_schema,
+    save_procedure_schema,
+    recall_procedure_schema,
+    record_procedure_outcome_schema,
 ]
 
 # ── Handlers ──────────────────────────────────────────────────────────────────
@@ -170,6 +240,73 @@ def _make_recall_semantic_handler(orchestrator: "VoiceOrchestrator"):
     return handler
 
 
+def _make_save_procedure_handler(orchestrator: "VoiceOrchestrator"):
+    async def handler(params: FunctionCallParams) -> None:
+        name = params.arguments["name"]
+        description = params.arguments["description"]
+        steps = params.arguments["steps"]
+
+        try:
+            procedure = await asyncio.to_thread(
+                orchestrator.bundle.procedural_memory.save,
+                agent_state.active, name, description, steps,
+            )
+        except ValueError as exc:
+            await params.result_callback(str(exc))
+            return
+
+        await params.result_callback(
+            f"Saved procedure '{procedure.name}' with {len(procedure.steps)} steps."
+        )
+    return handler
+
+
+def _make_recall_procedure_handler(orchestrator: "VoiceOrchestrator"):
+    async def handler(params: FunctionCallParams) -> None:
+        query = params.arguments["query"]
+        agent_name = params.arguments.get("agent_name") or agent_state.active
+
+        procedures = await asyncio.to_thread(
+            orchestrator.bundle.procedural_memory.recall, query, agent_name, 3
+        )
+
+        if not procedures:
+            await params.result_callback("No matching procedures found.")
+            return
+
+        lines = []
+        for procedure in procedures:
+            steps_text = " -> ".join(procedure.steps)
+            lines.append(
+                f"- {procedure.name}: {procedure.description} "
+                f"(succeeded {procedure.success_count}x, failed {procedure.failure_count}x) "
+                f"steps: {steps_text}"
+            )
+        await params.result_callback("\n".join(lines))
+    return handler
+
+
+def _make_record_procedure_outcome_handler(orchestrator: "VoiceOrchestrator"):
+    async def handler(params: FunctionCallParams) -> None:
+        name = params.arguments["name"]
+        success = params.arguments["success"]
+
+        try:
+            procedure = await asyncio.to_thread(
+                orchestrator.bundle.procedural_memory.record_outcome,
+                agent_state.active, name, success,
+            )
+        except ValueError as exc:
+            await params.result_callback(str(exc))
+            return
+
+        await params.result_callback(
+            f"Recorded. '{procedure.name}' has {procedure.success_count} successes "
+            f"and {procedure.failure_count} failures so far."
+        )
+    return handler
+
+
 # ── Wiring ────────────────────────────────────────────────────────────────────
 
 def setup(orchestrator: "VoiceOrchestrator") -> None:
@@ -198,5 +335,20 @@ def setup(orchestrator: "VoiceOrchestrator") -> None:
     llm.register_function(
         "recall_semantic",
         _make_recall_semantic_handler(orchestrator),
+        cancel_on_interruption=False,
+    )
+    llm.register_function(
+        "save_procedure",
+        _make_save_procedure_handler(orchestrator),
+        cancel_on_interruption=False,
+    )
+    llm.register_function(
+        "recall_procedure",
+        _make_recall_procedure_handler(orchestrator),
+        cancel_on_interruption=False,
+    )
+    llm.register_function(
+        "record_procedure_outcome",
+        _make_record_procedure_outcome_handler(orchestrator),
         cancel_on_interruption=False,
     )
