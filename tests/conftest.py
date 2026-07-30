@@ -14,8 +14,13 @@ import pytest
 
 def pytest_configure(config):
     """
-    Set fake env vars before any module is imported.
-    Uses setdefault so a real .env on a developer machine takes precedence.
+    Force fake env vars before any module is imported, overriding whatever is
+    already in os.environ (e.g. a real .env auto-loaded by an IDE's debug
+    session). settings.py's `settings` singleton is built once at first
+    import, so if a real value leaks into os.environ ahead of this hook,
+    setdefault() would be a no-op and no later monkeypatch could undo it.
+    Live tests (test_*_live.py) intentionally bypass this by reading the
+    real key straight from .env via dotenv_values, so overriding here is safe.
     When a new required key is added to settings.py, add it here too — tests
     will fail loudly if this list drifts from the real Settings class.
     """
@@ -38,7 +43,7 @@ def pytest_configure(config):
         "KOKORO_ATLAS_VOICE_ID": "af_bella",
     }
     for key, value in defaults.items():
-        os.environ.setdefault(key, value)
+        os.environ[key] = value
 
 
 # ─── Fake environment ───────────────────────────────────────────
