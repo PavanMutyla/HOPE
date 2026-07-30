@@ -144,6 +144,10 @@ def make_episodic_memory() -> MagicMock:
     return MagicMock()
 
 
+def make_semantic_memory() -> MagicMock:
+    return MagicMock()
+
+
 TEST_SESSION_ID = "test-session"
 
 
@@ -155,6 +159,7 @@ async def test_metrics_update_meter_and_panel():
     summarizer = ContextSummarizer(
         context=make_context([]), meter=meter, panel=panel, client=make_openai_client(),
         episodic_memory=make_episodic_memory(), session_id=TEST_SESSION_ID,
+        semantic_memory=make_semantic_memory(),
     )
     summarizer._handle_metrics(make_usage_frame(100, 20))
     assert meter.last_prompt_tokens == 100
@@ -169,6 +174,7 @@ async def test_below_threshold_does_not_summarize():
     summarizer = ContextSummarizer(
         context=make_context([]), meter=meter, panel=MagicMock(), client=client,
         episodic_memory=make_episodic_memory(), session_id=TEST_SESSION_ID,
+        semantic_memory=make_semantic_memory(),
     )
     summarizer._handle_metrics(make_usage_frame(100, 20))
     assert summarizer._summary_task is None
@@ -188,6 +194,7 @@ async def test_at_threshold_summarizes_and_rewrites_context():
     summarizer = ContextSummarizer(
         context=context, meter=meter, panel=MagicMock(), client=client,
         episodic_memory=make_episodic_memory(), session_id=TEST_SESSION_ID,
+        semantic_memory=make_semantic_memory(),
     )
     summarizer._keep_recent = 4
 
@@ -219,6 +226,7 @@ async def test_successful_summarize_writes_episodic_memory():
     summarizer = ContextSummarizer(
         context=context, meter=meter, panel=MagicMock(), client=client,
         episodic_memory=episodic_memory, session_id=TEST_SESSION_ID,
+        semantic_memory=make_semantic_memory(),
     )
     summarizer._keep_recent = 4
 
@@ -237,6 +245,56 @@ async def test_successful_summarize_writes_episodic_memory():
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_successful_summarize_writes_semantic_memory():
+    messages = [
+        {"role": "system", "content": "sys"},
+        *[{"role": "user" if i % 2 == 0 else "assistant", "content": f"m{i}"} for i in range(10)],
+    ]
+    meter = ContextMeter(context_limit=1000)
+    client = make_openai_client("compressed history")
+    context = make_context(messages)
+    semantic_memory = make_semantic_memory()
+    summarizer = ContextSummarizer(
+        context=context, meter=meter, panel=MagicMock(), client=client,
+        episodic_memory=make_episodic_memory(), session_id=TEST_SESSION_ID,
+        semantic_memory=semantic_memory,
+    )
+    summarizer._keep_recent = 4
+
+    summarizer._handle_metrics(make_usage_frame(900, 50))
+    await summarizer._summary_task
+
+    semantic_memory.add.assert_called_once_with(agent=agent_state.active, text="compressed history")
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_semantic_write_failure_does_not_raise_or_undo_summarization():
+    messages = [
+        {"role": "system", "content": "sys"},
+        *[{"role": "user" if i % 2 == 0 else "assistant", "content": f"m{i}"} for i in range(10)],
+    ]
+    meter = ContextMeter(context_limit=1000)
+    client = make_openai_client("compressed history")
+    context = make_context(messages)
+    semantic_memory = make_semantic_memory()
+    semantic_memory.add.side_effect = RuntimeError("mem0 unreachable")
+    summarizer = ContextSummarizer(
+        context=context, meter=meter, panel=MagicMock(), client=client,
+        episodic_memory=make_episodic_memory(), session_id=TEST_SESSION_ID,
+        semantic_memory=semantic_memory,
+    )
+    summarizer._keep_recent = 4
+
+    summarizer._handle_metrics(make_usage_frame(900, 50))
+    await summarizer._summary_task  # must not raise
+
+    assert messages[1]["role"] == "developer"
+    assert "compressed history" in messages[1]["content"]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_failed_summarize_does_not_write_episodic_memory():
     messages = [
         {"role": "system", "content": "sys"},
@@ -249,6 +307,7 @@ async def test_failed_summarize_does_not_write_episodic_memory():
     summarizer = ContextSummarizer(
         context=make_context(messages), meter=meter, panel=MagicMock(), client=client,
         episodic_memory=episodic_memory, session_id=TEST_SESSION_ID,
+        semantic_memory=make_semantic_memory(),
     )
     summarizer._keep_recent = 4
 
@@ -272,6 +331,7 @@ async def test_episodic_write_failure_does_not_raise_or_undo_summarization():
     summarizer = ContextSummarizer(
         context=make_context(messages), meter=meter, panel=MagicMock(), client=client,
         episodic_memory=episodic_memory, session_id=TEST_SESSION_ID,
+        semantic_memory=make_semantic_memory(),
     )
     summarizer._keep_recent = 4
 
@@ -305,6 +365,7 @@ async def test_messages_added_during_summarization_survive():
     summarizer = ContextSummarizer(
         context=context, meter=meter, panel=MagicMock(), client=client,
         episodic_memory=make_episodic_memory(), session_id=TEST_SESSION_ID,
+        semantic_memory=make_semantic_memory(),
     )
     summarizer._keep_recent = 4
 
@@ -338,6 +399,7 @@ async def test_agent_switch_during_summarization_is_not_reverted():
     summarizer = ContextSummarizer(
         context=context, meter=meter, panel=MagicMock(), client=client,
         episodic_memory=make_episodic_memory(), session_id=TEST_SESSION_ID,
+        semantic_memory=make_semantic_memory(),
     )
     summarizer._keep_recent = 4
 
@@ -371,6 +433,7 @@ async def test_no_double_fire_while_task_running():
     summarizer = ContextSummarizer(
         context=make_context(messages), meter=meter, panel=MagicMock(), client=client,
         episodic_memory=make_episodic_memory(), session_id=TEST_SESSION_ID,
+        semantic_memory=make_semantic_memory(),
     )
     summarizer._keep_recent = 4
 
@@ -400,6 +463,7 @@ async def test_summarize_failure_recovers_and_retries():
     summarizer = ContextSummarizer(
         context=context, meter=meter, panel=MagicMock(), client=client,
         episodic_memory=make_episodic_memory(), session_id=TEST_SESSION_ID,
+        semantic_memory=make_semantic_memory(),
     )
     summarizer._keep_recent = 4
 
@@ -429,6 +493,7 @@ async def test_ttfb_metrics_recorded_without_usage_update():
     summarizer = ContextSummarizer(
         context=make_context([]), meter=meter, panel=panel, client=make_openai_client(),
         episodic_memory=make_episodic_memory(), session_id=TEST_SESSION_ID,
+        semantic_memory=make_semantic_memory(),
     )
     frame = MetricsFrame(data=[TTFBMetricsData(processor="llm", value=0.37)])
 
@@ -456,6 +521,7 @@ async def test_process_frame_pushes_all_frames_through():
     summarizer = ContextSummarizer(
         context=make_context([]), meter=meter, panel=panel, client=client,
         episodic_memory=make_episodic_memory(), session_id=TEST_SESSION_ID,
+        semantic_memory=make_semantic_memory(),
     )
     summarizer.push_frame = AsyncMock()
     summarizer._handle_metrics = MagicMock(wraps=summarizer._handle_metrics)
@@ -484,10 +550,12 @@ async def test_flush_writes_raw_archive_tagged_session_end_raw():
         {"role": "assistant", "content": "run the deploy script"},
     ]
     episodic_memory = make_episodic_memory()
+    semantic_memory = make_semantic_memory()
     summarizer = ContextSummarizer(
         context=make_context(messages), meter=ContextMeter(context_limit=1000),
         panel=MagicMock(), client=make_openai_client(),
         episodic_memory=episodic_memory, session_id=TEST_SESSION_ID,
+        semantic_memory=semantic_memory,
     )
 
     await summarizer.flush()
@@ -502,6 +570,8 @@ async def test_flush_writes_raw_archive_tagged_session_end_raw():
     assert call_kwargs["summary"].startswith(UNSUMMARIZED_MARKER)
     assert "how do I deploy this?" in call_kwargs["summary"]
     assert "run the deploy script" in call_kwargs["summary"]
+    # deliberately no semantic write at flush() — see flush()'s docstring
+    semantic_memory.add.assert_not_called()
 
 
 @pytest.mark.unit
@@ -513,6 +583,7 @@ async def test_flush_with_nothing_but_system_message_does_not_write():
         context=make_context(messages), meter=ContextMeter(context_limit=1000),
         panel=MagicMock(), client=make_openai_client(),
         episodic_memory=episodic_memory, session_id=TEST_SESSION_ID,
+        semantic_memory=make_semantic_memory(),
     )
 
     await summarizer.flush()
@@ -532,6 +603,7 @@ async def test_flush_archives_everything_regardless_of_keep_recent():
         context=make_context(messages), meter=ContextMeter(context_limit=1000),
         panel=MagicMock(), client=make_openai_client(),
         episodic_memory=episodic_memory, session_id=TEST_SESSION_ID,
+        semantic_memory=make_semantic_memory(),
     )
     summarizer._keep_recent = 4  # must not limit what flush() archives
 
@@ -550,6 +622,7 @@ async def test_flush_never_calls_the_llm():
         context=make_context(messages), meter=ContextMeter(context_limit=1000),
         panel=MagicMock(), client=client,
         episodic_memory=make_episodic_memory(), session_id=TEST_SESSION_ID,
+        semantic_memory=make_semantic_memory(),
     )
 
     await summarizer.flush()
@@ -567,6 +640,7 @@ async def test_flush_failure_does_not_raise():
         context=make_context(messages), meter=ContextMeter(context_limit=1000),
         panel=MagicMock(), client=make_openai_client(),
         episodic_memory=episodic_memory, session_id=TEST_SESSION_ID,
+        semantic_memory=make_semantic_memory(),
     )
 
     await summarizer.flush()  # must not raise
@@ -592,11 +666,13 @@ async def test_upgrade_pending_episodes_upgrades_each_one():
     episodic_memory = MagicMock()
     episodic_memory.list_by_reason.return_value = [make_pending_episode("ep_1")]
     client = make_openai_client("a real summary")
+    semantic_memory = make_semantic_memory()
 
-    await upgrade_pending_episodes(episodic_memory, client)
+    await upgrade_pending_episodes(episodic_memory, client, semantic_memory)
 
     episodic_memory.list_by_reason.assert_called_once_with("session_end_raw")
     episodic_memory.upgrade.assert_called_once_with("ep_1", "hope", "a real summary")
+    semantic_memory.add.assert_called_once_with(agent="hope", text="a real summary")
 
 
 @pytest.mark.unit
@@ -606,7 +682,7 @@ async def test_upgrade_pending_episodes_with_none_pending_does_nothing():
     episodic_memory.list_by_reason.return_value = []
     client = make_openai_client()
 
-    await upgrade_pending_episodes(episodic_memory, client)
+    await upgrade_pending_episodes(episodic_memory, client, make_semantic_memory())
 
     client.chat.completions.create.assert_not_called()
     episodic_memory.upgrade.assert_not_called()
@@ -625,7 +701,7 @@ async def test_upgrade_pending_episodes_one_failure_does_not_block_the_rest():
         side_effect=[RuntimeError("api down"), client.chat.completions.create.return_value]
     )
 
-    await upgrade_pending_episodes(episodic_memory, client)  # must not raise
+    await upgrade_pending_episodes(episodic_memory, client, make_semantic_memory())  # must not raise
 
     episodic_memory.upgrade.assert_called_once_with("ep_fine", "hope", "a real summary")
 

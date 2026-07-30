@@ -141,6 +141,7 @@ def pipeline_mocks(monkeypatch):
         "ContextSummarizer",
         "AsyncOpenAI",
         "EpisodicMemory",
+        "SemanticMemory",
     ]}
 
     for name, mock in mocks.items():

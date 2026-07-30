@@ -35,6 +35,8 @@ def test_bundle_exposes_all_required_fields(pipeline_mocks):
     assert bundle.transport is not None
     assert bundle.panel is not None
     assert bundle.tracer is not None
+    assert bundle.episodic_memory is not None
+    assert bundle.semantic_memory is not None
 
 
 @pytest.mark.integration

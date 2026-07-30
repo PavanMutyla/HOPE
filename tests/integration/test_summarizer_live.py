@@ -68,6 +68,7 @@ async def test_live_summarization_compresses_and_preserves_facts():
     summarizer = ContextSummarizer(
         context=context, meter=meter, panel=MagicMock(), client=client,
         episodic_memory=MagicMock(), session_id="live-test-session",
+        semantic_memory=MagicMock(),
     )
     summarizer._keep_recent = 2
 

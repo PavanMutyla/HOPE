@@ -42,7 +42,7 @@ def _fake_response(finish_reason: str, content: str | None = None, tool_calls=No
 
 @pytest.fixture
 def atlas(episodic_memory):
-    instance = Atlas(episodic_memory=episodic_memory)
+    instance = Atlas(episodic_memory=episodic_memory, semantic_memory=MagicMock())
     instance._client = MagicMock()
     return instance
 
@@ -59,6 +59,37 @@ async def test_completed_task_writes_one_episode_tagged_atlas(atlas, episodic_me
     assert len(results) == 1
     assert results[0].agent == "atlas"
     assert results[0].reason == "task_complete"
+
+
+@pytest.mark.integration
+async def test_completed_task_writes_one_semantic_fact_tagged_atlas(atlas):
+    atlas._client.chat.completions.create = AsyncMock(
+        return_value=_fake_response("stop", content="Listed 3 files.")
+    )
+
+    await atlas.run("list the files", AsyncMock())
+
+    atlas._semantic_memory.add.assert_called_once_with(
+        agent="atlas", text="Task: list the files\nResult: Listed 3 files."
+    )
+
+
+@pytest.mark.integration
+async def test_semantic_write_failure_does_not_break_result_callback():
+    """A broken semantic store must never swallow the task's actual result,
+    same guarantee as the episodic write failure case below."""
+    broken_semantic = MagicMock()
+    broken_semantic.add.side_effect = RuntimeError("mem0 unreachable")
+    atlas = Atlas(episodic_memory=MagicMock(), semantic_memory=broken_semantic)
+    atlas._client = MagicMock()
+    atlas._client.chat.completions.create = AsyncMock(
+        return_value=_fake_response("stop", content="All done.")
+    )
+    result_callback = AsyncMock()
+
+    await atlas.run("do the thing", result_callback)
+
+    result_callback.assert_called_once_with("All done.")
 
 
 @pytest.mark.integration
@@ -117,7 +148,7 @@ async def test_episodic_write_failure_does_not_break_result_callback():
     """A broken episodic store must never swallow the task's actual result."""
     broken_memory = MagicMock()
     broken_memory.write.side_effect = RuntimeError("db is locked")
-    atlas = Atlas(episodic_memory=broken_memory)
+    atlas = Atlas(episodic_memory=broken_memory, semantic_memory=MagicMock())
     atlas._client = MagicMock()
     atlas._client.chat.completions.create = AsyncMock(
         return_value=_fake_response("stop", content="All done.")
