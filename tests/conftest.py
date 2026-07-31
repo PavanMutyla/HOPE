@@ -149,6 +149,7 @@ def pipeline_mocks(monkeypatch):
         "EpisodicMemory",
         "SemanticMemory",
         "ProceduralMemory",
+        "Blackboard",
     ]}
 
     for name, mock in mocks.items():

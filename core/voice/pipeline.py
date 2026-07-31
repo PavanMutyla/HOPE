@@ -29,6 +29,7 @@ from core.voice.team_broadcast import TeamBroadcastObserver
 from core.voice.team_registry import team_registry
 from core.observability import LangfuseObserver, LangfuseTracer
 from core.status import StatusMonitor, StatusPanel
+from memory.coordination.store import Blackboard
 from memory.episodic_memory.store import EpisodicMemory
 from memory.procedural_memory.store import ProceduralMemory
 from memory.semantic_memory.store import SemanticMemory
@@ -66,6 +67,7 @@ class VoicePipelineBundle:
     semantic_memory: SemanticMemory
     procedural_memory: ProceduralMemory
     summarizer: ContextSummarizer
+    blackboard: Blackboard
 
 
 def build_pipeline(agent: VoiceAgent, tools: list[FunctionSchema]) -> VoicePipelineBundle:
@@ -138,6 +140,7 @@ def build_pipeline(agent: VoiceAgent, tools: list[FunctionSchema]) -> VoicePipel
     episodic_memory = EpisodicMemory()
     semantic_memory = SemanticMemory()
     procedural_memory = ProceduralMemory()
+    blackboard = Blackboard(episodic_memory=episodic_memory)
     summarizer = ContextSummarizer(
         context=context,
         meter=meter,
@@ -183,4 +186,5 @@ def build_pipeline(agent: VoiceAgent, tools: list[FunctionSchema]) -> VoicePipel
         semantic_memory=semantic_memory,
         procedural_memory=procedural_memory,
         summarizer=summarizer,
+        blackboard=blackboard,
     )
