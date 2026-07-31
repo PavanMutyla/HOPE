@@ -91,3 +91,11 @@ class CheckPlansArgs(BaseModel):
 class ConsultAgentsArgs(BaseModel):
     agent_names: list[str] = Field(description="Names of the agents to consult, e.g. ['atlas'].")
     message: str = Field(description="The question or task to send to each agent.")
+
+
+class EnableTeamModeArgs(BaseModel):
+    pass
+
+
+class DisableTeamModeArgs(BaseModel):
+    pass

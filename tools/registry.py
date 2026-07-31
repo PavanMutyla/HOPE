@@ -9,11 +9,14 @@ from sub_agents.atlas.agent import Atlas
 
 from core.voice.agent_state import agent_state
 from core.voice.orchestrator import VoiceOrchestrator
+from core.voice.team_state import team_state
 from tools.schema import (
     CheckPlansArgs,
     ConnectToAtlasArgs,
     ConsultAgentsArgs,
     DelegateToAtlasArgs,
+    DisableTeamModeArgs,
+    EnableTeamModeArgs,
     HandbackToHopeArgs,
     RecallMemoryArgs,
     RecallProcedureArgs,
@@ -118,6 +121,26 @@ consult_agents_schema = function_schema(
     ConsultAgentsArgs,
 )
 
+enable_team_mode_schema = function_schema(
+    "enable_team_mode",
+    (
+        "Turn on team mode so other agents can listen in on this conversation and "
+        "speak up on their own, in their own voice, when they have something "
+        "relevant to add. Use when Pavan says something like 'bring the team in' "
+        "or 'let everyone listen in'."
+    ),
+    EnableTeamModeArgs,
+)
+
+disable_team_mode_schema = function_schema(
+    "disable_team_mode",
+    (
+        "Turn off team mode so it's back to just you and Pavan. Use when Pavan "
+        "says something like 'just us' or 'team mode off'."
+    ),
+    DisableTeamModeArgs,
+)
+
 check_plans_schema = function_schema(
     "check_plans",
     (
@@ -140,6 +163,8 @@ ALL_SCHEMAS = [
     record_procedure_outcome_schema,
     check_plans_schema,
     consult_agents_schema,
+    enable_team_mode_schema,
+    disable_team_mode_schema,
 ]
 
 # ── Handlers ──────────────────────────────────────────────────────────────────
@@ -306,6 +331,18 @@ def _make_consult_agents_handler(orchestrator: "VoiceOrchestrator"):
     return handler
 
 
+async def enable_team_mode_handler(params: FunctionCallParams) -> None:
+    EnableTeamModeArgs(**params.arguments)
+    team_state.enabled = True
+    await params.result_callback("Team mode is on — everyone's listening now.")
+
+
+async def disable_team_mode_handler(params: FunctionCallParams) -> None:
+    DisableTeamModeArgs(**params.arguments)
+    team_state.enabled = False
+    await params.result_callback("Team mode is off — back to just us.")
+
+
 # ── Wiring ────────────────────────────────────────────────────────────────────
 
 def setup(orchestrator: "VoiceOrchestrator") -> None:
@@ -359,5 +396,15 @@ def setup(orchestrator: "VoiceOrchestrator") -> None:
     llm.register_function(
         "consult_agents",
         _make_consult_agents_handler(orchestrator),
+        cancel_on_interruption=False,
+    )
+    llm.register_function(
+        "enable_team_mode",
+        enable_team_mode_handler,
+        cancel_on_interruption=False,
+    )
+    llm.register_function(
+        "disable_team_mode",
+        disable_team_mode_handler,
         cancel_on_interruption=False,
     )

@@ -51,6 +51,12 @@ def test_hope_prompt_mentions_atlas():
 
 
 @pytest.mark.unit
+def test_hope_prompt_mentions_team_mode_tools():
+    assert "enable_team_mode" in SYSTEM_PROMPT
+    assert "disable_team_mode" in SYSTEM_PROMPT
+
+
+@pytest.mark.unit
 def test_hope_prompt_interpolates_atlas_workspace():
     """atlas_workspace from settings must appear in the prompt (f-string interpolation)."""
     from settings import settings
