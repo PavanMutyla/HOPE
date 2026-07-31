@@ -165,6 +165,27 @@ record_procedure_outcome_schema = FunctionSchema(
     required=["name", "success"],
 )
 
+consult_agents_schema = FunctionSchema(
+    name="consult_agents",
+    description=(
+        "Ask multiple agents the same question or task concurrently and gather all "
+        "their replies at once, instead of contacting them one at a time. Use when "
+        "you need input from more than one agent to answer Pavan."
+    ),
+    properties={
+        "agent_names": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "Names of the agents to consult, e.g. ['atlas'].",
+        },
+        "message": {
+            "type": "string",
+            "description": "The question or task to send to each agent.",
+        },
+    },
+    required=["agent_names", "message"],
+)
+
 check_plans_schema = FunctionSchema(
     name="check_plans",
     description=(
@@ -199,6 +220,7 @@ ALL_SCHEMAS = [
     recall_procedure_schema,
     record_procedure_outcome_schema,
     check_plans_schema,
+    consult_agents_schema,
 ]
 
 # ── Handlers ──────────────────────────────────────────────────────────────────
@@ -351,6 +373,22 @@ def _make_check_plans_handler(orchestrator: "VoiceOrchestrator"):
     return handler
 
 
+def _make_consult_agents_handler(orchestrator: "VoiceOrchestrator"):
+    async def handler(params: FunctionCallParams) -> None:
+        agent_names = params.arguments["agent_names"]
+        message = params.arguments["message"]
+
+        try:
+            replies = await orchestrator.broadcast(agent_state.active, agent_names, message)
+        except KeyError as exc:
+            await params.result_callback(str(exc))
+            return
+
+        summary_text = "\n".join(f"- {name}: {reply}" for name, reply in replies.items())
+        await params.result_callback(summary_text)
+    return handler
+
+
 # ── Wiring ────────────────────────────────────────────────────────────────────
 
 def setup(orchestrator: "VoiceOrchestrator") -> None:
@@ -399,5 +437,10 @@ def setup(orchestrator: "VoiceOrchestrator") -> None:
     llm.register_function(
         "check_plans",
         _make_check_plans_handler(orchestrator),
+        cancel_on_interruption=False,
+    )
+    llm.register_function(
+        "consult_agents",
+        _make_consult_agents_handler(orchestrator),
         cancel_on_interruption=False,
     )

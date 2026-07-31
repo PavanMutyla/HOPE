@@ -1,3 +1,5 @@
+import asyncio
+
 from openai import AsyncOpenAI
 
 from core.voice.agent import AgentRegistry
@@ -25,3 +27,16 @@ class VoiceOrchestrator:
             ],
         )
         return response.choices[0].message.content or ""
+
+    async def broadcast(self, from_agent: str, to_agents: list[str], message: str) -> dict[str, str]:
+        """Send the same message to multiple agents concurrently, keyed by agent name.
+
+        Runs one agent_to_agent() call per target via asyncio.gather instead of
+        awaiting them one at a time, so a slow or failing agent doesn't delay
+        the others. Any exception propagates — same failure behavior as calling
+        agent_to_agent() directly.
+        """
+        replies = await asyncio.gather(
+            *(self.agent_to_agent(from_agent, to_agent, message) for to_agent in to_agents)
+        )
+        return dict(zip(to_agents, replies))

@@ -5,6 +5,7 @@ from tools.registry import (
     ALL_SCHEMAS,
     check_plans_schema,
     connect_to_atlas_schema,
+    consult_agents_schema,
     delegate_to_atlas_schema,
     handback_to_hope_schema,
     recall_memory_schema,
@@ -16,8 +17,8 @@ from tools.registry import (
 
 
 @pytest.mark.unit
-def test_all_schemas_contains_exactly_nine_tools():
-    assert len(ALL_SCHEMAS) == 9
+def test_all_schemas_contains_exactly_ten_tools():
+    assert len(ALL_SCHEMAS) == 10
 
 
 @pytest.mark.unit
@@ -33,6 +34,7 @@ def test_all_schemas_names_are_correct():
         "recall_procedure",
         "record_procedure_outcome",
         "check_plans",
+        "consult_agents",
     }
 
 
@@ -166,3 +168,20 @@ def test_check_plans_schema_has_no_required_parameters():
 def test_check_plans_schema_has_agent_name_and_status_properties():
     assert "agent_name" in check_plans_schema.properties
     assert "status" in check_plans_schema.properties
+
+
+@pytest.mark.unit
+def test_consult_agents_schema_requires_agent_names_and_message():
+    assert set(consult_agents_schema.required) == {"agent_names", "message"}
+
+
+@pytest.mark.unit
+def test_consult_agents_schema_agent_names_is_string_array():
+    agent_names_property = consult_agents_schema.properties["agent_names"]
+    assert agent_names_property["type"] == "array"
+    assert agent_names_property["items"]["type"] == "string"
+
+
+@pytest.mark.unit
+def test_consult_agents_schema_message_is_string_type():
+    assert consult_agents_schema.properties["message"]["type"] == "string"
