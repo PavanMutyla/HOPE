@@ -99,3 +99,41 @@ class EnableTeamModeArgs(BaseModel):
 
 class DisableTeamModeArgs(BaseModel):
     pass
+
+
+class PostTaskArgs(BaseModel):
+    description: str = Field(description="Natural language description of the task to post.")
+
+
+class ClaimTaskArgs(BaseModel):
+    task_id: str = Field(description="The task_id returned by post_task or get_active_tasks.")
+
+
+class UpdateTaskStatusArgs(BaseModel):
+    task_id: str = Field(description="The task_id to update.")
+    status: str = Field(
+        description="New status: 'in_progress', 'completed', or 'failed'."
+    )
+    detail: str | None = Field(
+        default=None,
+        description="Optional detail about the outcome, e.g. a result summary or error message.",
+    )
+
+
+class GetActiveTasksArgs(BaseModel):
+    agent_name: str | None = Field(
+        default=None,
+        description="Filter to tasks owned by this agent. Omit to see every active task.",
+    )
+
+
+class SendSignalArgs(BaseModel):
+    to_agent: str = Field(description="Name of the agent to send the message to.")
+    payload: str = Field(description="The message content.")
+
+
+class GetSignalsArgs(BaseModel):
+    agent_name: str | None = Field(
+        default=None,
+        description="Whose unread signals to check. Omit to check your own.",
+    )

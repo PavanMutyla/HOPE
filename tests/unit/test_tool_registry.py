@@ -4,23 +4,29 @@ import pytest
 from tools.registry import (
     ALL_SCHEMAS,
     check_plans_schema,
+    claim_task_schema,
     connect_to_atlas_schema,
     consult_agents_schema,
     delegate_to_atlas_schema,
     disable_team_mode_schema,
     enable_team_mode_schema,
+    get_active_tasks_schema,
+    get_signals_schema,
     handback_to_hope_schema,
+    post_task_schema,
     recall_memory_schema,
     recall_procedure_schema,
     recall_semantic_schema,
     record_procedure_outcome_schema,
     save_procedure_schema,
+    send_signal_schema,
+    update_task_status_schema,
 )
 
 
 @pytest.mark.unit
-def test_all_schemas_contains_exactly_twelve_tools():
-    assert len(ALL_SCHEMAS) == 12
+def test_all_schemas_contains_exactly_eighteen_tools():
+    assert len(ALL_SCHEMAS) == 18
 
 
 @pytest.mark.unit
@@ -39,6 +45,12 @@ def test_all_schemas_names_are_correct():
         "consult_agents",
         "enable_team_mode",
         "disable_team_mode",
+        "post_task",
+        "claim_task",
+        "update_task_status",
+        "get_active_tasks",
+        "send_signal",
+        "get_signals",
     }
 
 
@@ -209,3 +221,55 @@ def test_enable_team_mode_schema_description_mentions_team():
 @pytest.mark.unit
 def test_disable_team_mode_schema_description_mentions_team():
     assert "team" in disable_team_mode_schema.description.lower()
+
+
+@pytest.mark.unit
+def test_post_task_schema_requires_only_description():
+    assert post_task_schema.required == ["description"]
+
+
+@pytest.mark.unit
+def test_post_task_schema_description_property_is_string_type():
+    assert post_task_schema.properties["description"]["type"] == "string"
+
+
+@pytest.mark.unit
+def test_claim_task_schema_requires_only_task_id():
+    assert claim_task_schema.required == ["task_id"]
+
+
+@pytest.mark.unit
+def test_update_task_status_schema_requires_task_id_and_status():
+    assert set(update_task_status_schema.required) == {"task_id", "status"}
+
+
+@pytest.mark.unit
+def test_update_task_status_schema_has_optional_detail_property():
+    assert "detail" in update_task_status_schema.properties
+    assert "detail" not in update_task_status_schema.required
+
+
+@pytest.mark.unit
+def test_get_active_tasks_schema_has_no_required_parameters():
+    assert get_active_tasks_schema.required == []
+
+
+@pytest.mark.unit
+def test_get_active_tasks_schema_has_agent_name_property():
+    assert "agent_name" in get_active_tasks_schema.properties
+
+
+@pytest.mark.unit
+def test_send_signal_schema_requires_to_agent_and_payload():
+    assert set(send_signal_schema.required) == {"to_agent", "payload"}
+
+
+@pytest.mark.unit
+def test_get_signals_schema_has_no_required_parameters():
+    assert get_signals_schema.required == []
+
+
+@pytest.mark.unit
+def test_get_signals_schema_has_optional_agent_name_property():
+    assert "agent_name" in get_signals_schema.properties
+    assert "agent_name" not in get_signals_schema.required
