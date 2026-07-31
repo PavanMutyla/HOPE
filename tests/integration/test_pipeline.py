@@ -137,6 +137,14 @@ def test_pipeline_includes_context_summarizer(pipeline_mocks, hope_voice_agent):
 
 
 @pytest.mark.integration
+def test_pipeline_includes_team_broadcast_observer(pipeline_mocks, hope_voice_agent):
+    from core.voice.pipeline import build_pipeline
+    build_pipeline(hope_voice_agent, [])
+    processors = pipeline_mocks["Pipeline"].call_args[0][0]
+    assert pipeline_mocks["TeamBroadcastObserver"].return_value in processors
+
+
+@pytest.mark.integration
 def test_bundle_exposes_summarizer_for_shutdown_flush(pipeline_mocks, hope_voice_agent):
     """hope.py's shutdown finally block calls bundle.summarizer.flush() —
     the summarizer must be reachable off the bundle, not just wired into the

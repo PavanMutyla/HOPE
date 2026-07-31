@@ -6,10 +6,12 @@ from pipecat.frames.frames import LLMRunFrame
 from pipecat.workers.runner import WorkerRunner
 
 from sub_agents.atlas.agent import atlas_agent
+from sub_agents.atlas.team import build_atlas_team_member
 from core.voice.agent import AgentRegistry, VoiceAgent
 from core.voice.orchestrator import VoiceOrchestrator
 from core.voice.pipeline import build_pipeline
 from core.voice.summarizer import inject_warm_start, upgrade_pending_episodes
+from core.voice.team_registry import team_registry
 from core.prompt import SYSTEM_PROMPT
 from settings import settings
 from tools.registry import ALL_SCHEMAS, setup as setup_tools
@@ -26,6 +28,9 @@ async def main():
     registry = AgentRegistry()
     registry.register(hope_agent)
     registry.register(atlas_agent)
+
+    atlas_team_member = build_atlas_team_member()
+    team_registry.register(atlas_team_member)
 
     bundle = build_pipeline(hope_agent, ALL_SCHEMAS)
     orchestrator = VoiceOrchestrator(registry, bundle)
@@ -59,6 +64,7 @@ async def main():
         bundle.tracer.shutdown()
         await bundle.summarizer.flush()
         bundle.episodic_memory.close()
+        atlas_team_member.voice.close()
 
 
 if __name__ == "__main__":

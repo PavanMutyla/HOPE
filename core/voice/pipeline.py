@@ -1,7 +1,6 @@
 import uuid
 from dataclasses import dataclass
 
-from loguru import logger
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
@@ -14,7 +13,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
     LLMUserAggregatorParams,
 )
-from pipecat.services.kokoro.tts import KOKORO_CACHE_DIR, KokoroTTSService
+from pipecat.services.kokoro.tts import KokoroTTSService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.openai.stt import OpenAISTTService
 from pipecat.transports.local.audio import LocalAudioTransport, LocalAudioTransportParams
@@ -24,7 +23,10 @@ from openai import AsyncOpenAI
 
 from core.voice.agent import VoiceAgent
 from core.voice.context_meter import ContextMeter, resolve_context_limit
+from core.voice.kokoro_cache import ensure_kokoro_files, recover_corrupted_kokoro_cache
 from core.voice.summarizer import ContextSummarizer
+from core.voice.team_broadcast import TeamBroadcastObserver
+from core.voice.team_registry import team_registry
 from core.observability import LangfuseObserver, LangfuseTracer
 from core.status import StatusMonitor, StatusPanel
 from memory.episodic_memory.store import EpisodicMemory
@@ -36,28 +38,16 @@ from settings import settings
 def _build_kokoro_tts(voice_id: str) -> KokoroTTSService:
     """Construct KokoroTTSService, recovering once from a corrupted/partial model cache.
 
-    Pipecat auto-downloads the model on first use but only checks that the
-    cache files *exist* — a truncated download (e.g. an interrupted transfer
-    on first run on a new machine) leaves a file that exists but fails to
-    load. Detect that case, delete the cache, and let pipecat re-download.
     Any other failure is not ours to interpret — let it propagate.
     """
-    model_file = KOKORO_CACHE_DIR / "kokoro-v1.0.onnx"
-    voices_file = KOKORO_CACHE_DIR / "voices-v1.0.bin"
-
-    if not model_file.exists() or not voices_file.exists():
-        logger.info("Kokoro TTS model not found locally — downloading (~300MB, one-time)...")
+    model_file, voices_file = ensure_kokoro_files()
 
     try:
         return KokoroTTSService(settings=KokoroTTSService.Settings(voice=voice_id))
     except Exception:
         if not model_file.exists() and not voices_file.exists():
             raise
-        logger.warning(
-            "Kokoro TTS model cache looks corrupted or incomplete — deleting and re-downloading..."
-        )
-        model_file.unlink(missing_ok=True)
-        voices_file.unlink(missing_ok=True)
+        recover_corrupted_kokoro_cache(model_file, voices_file)
         return KokoroTTSService(settings=KokoroTTSService.Settings(voice=voice_id))
 
 
@@ -135,6 +125,10 @@ def build_pipeline(agent: VoiceAgent, tools: list[FunctionSchema]) -> VoicePipel
     pre_trace = LangfuseObserver(tracer)
     post_trace = LangfuseObserver(tracer)
 
+    team_broadcast = TeamBroadcastObserver(
+        team_registry, AsyncOpenAI(api_key=settings.openai_api_key)
+    )
+
     meter = ContextMeter(
         context_limit=resolve_context_limit(
             f"{settings.llm_provider}/{settings.llm_model}", settings.llm_context_limit
@@ -157,6 +151,7 @@ def build_pipeline(agent: VoiceAgent, tools: list[FunctionSchema]) -> VoicePipel
     pipeline = Pipeline([
         transport.input(),
         stt,
+        team_broadcast,
         pre_monitor,
         pre_trace,
         context_aggregator.user(),

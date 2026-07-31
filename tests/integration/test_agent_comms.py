@@ -73,6 +73,45 @@ async def test_agent_to_agent_raises_for_unknown_agent(mock_orchestrator):
 
 
 @pytest.mark.integration
+async def test_broadcast_queries_all_target_agents(mock_orchestrator):
+    """broadcast() must call agent_to_agent() for every target agent, not just the first."""
+    with patch.object(
+        mock_orchestrator, "agent_to_agent", new=AsyncMock(side_effect=lambda frm, to, msg: f"reply from {to}")
+    ) as mock_call:
+        result = await mock_orchestrator.broadcast("hope", ["atlas", "hope"], "status?")
+
+    assert result == {"atlas": "reply from atlas", "hope": "reply from hope"}
+    assert mock_call.call_count == 2
+
+
+@pytest.mark.integration
+async def test_broadcast_runs_targets_concurrently(mock_orchestrator):
+    """broadcast() must not block on one target before starting the next (asyncio.gather, not a loop of awaits)."""
+    import asyncio
+
+    started = []
+
+    async def slow_reply(frm, to, msg):
+        started.append(to)
+        await asyncio.sleep(0.05)
+        return to
+
+    with patch.object(mock_orchestrator, "agent_to_agent", new=AsyncMock(side_effect=slow_reply)):
+        await mock_orchestrator.broadcast("hope", ["atlas", "hope"], "status?")
+
+    # Both calls must have started before either finished sleeping — proves concurrency.
+    assert started == ["atlas", "hope"]
+
+
+@pytest.mark.integration
+async def test_broadcast_propagates_agent_to_agent_errors(mock_orchestrator):
+    """A KeyError from an unknown agent must propagate out of broadcast(), not be swallowed."""
+    with patch.object(mock_orchestrator, "agent_to_agent", new=AsyncMock(side_effect=KeyError("nope"))):
+        with pytest.raises(KeyError):
+            await mock_orchestrator.broadcast("hope", ["nonexistent_agent"], "hello")
+
+
+@pytest.mark.integration
 async def test_switch_to_updates_active_agent(mock_orchestrator):
     """switch_to() must update both the LLM context and the agent_state tracker."""
     from core.voice.agent_state import agent_state

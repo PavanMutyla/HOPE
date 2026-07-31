@@ -144,6 +144,7 @@ def pipeline_mocks(monkeypatch):
         "StatusPanel",
         "StatusMonitor",
         "ContextSummarizer",
+        "TeamBroadcastObserver",
         "AsyncOpenAI",
         "EpisodicMemory",
         "SemanticMemory",
