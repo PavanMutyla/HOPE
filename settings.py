@@ -30,6 +30,7 @@ class Settings(BaseSettings):
     semantic_persist_dir: str = "data_store/semantic_memory/chroma"
     semantic_history_db_path: str = "data_store/semantic_memory/history.db"
     procedures_dir: str = "procedures"
+    blackboard_db_path: str = "data_store/coordination/blackboard.db"
 
 
 settings = Settings()

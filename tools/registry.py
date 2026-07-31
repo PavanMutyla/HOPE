@@ -12,17 +12,23 @@ from core.voice.orchestrator import VoiceOrchestrator
 from core.voice.team_state import team_state
 from tools.schema import (
     CheckPlansArgs,
+    ClaimTaskArgs,
     ConnectToAtlasArgs,
     ConsultAgentsArgs,
     DelegateToAtlasArgs,
     DisableTeamModeArgs,
     EnableTeamModeArgs,
+    GetActiveTasksArgs,
+    GetSignalsArgs,
     HandbackToHopeArgs,
+    PostTaskArgs,
     RecallMemoryArgs,
     RecallProcedureArgs,
     RecallSemanticArgs,
     RecordProcedureOutcomeArgs,
     SaveProcedureArgs,
+    SendSignalArgs,
+    UpdateTaskStatusArgs,
     function_schema,
 )
 
@@ -152,6 +158,60 @@ check_plans_schema = function_schema(
     CheckPlansArgs,
 )
 
+post_task_schema = function_schema(
+    "post_task",
+    (
+        "Post a task to the shared coordination pool for any agent to pick up — "
+        "use this to hand off work without waiting for a specific agent to be "
+        "free, unlike delegate_to_atlas which targets Atlas directly."
+    ),
+    PostTaskArgs,
+)
+
+claim_task_schema = function_schema(
+    "claim_task",
+    (
+        "Claim an open task from the coordination pool so you're the one working "
+        "on it. Fails harmlessly if another agent already claimed it first."
+    ),
+    ClaimTaskArgs,
+)
+
+update_task_status_schema = function_schema(
+    "update_task_status",
+    (
+        "Update the status of a task you're working on — mark it in_progress, "
+        "completed, or failed. Completing or failing a task also records it in "
+        "durable memory automatically."
+    ),
+    UpdateTaskStatusArgs,
+)
+
+get_active_tasks_schema = function_schema(
+    "get_active_tasks",
+    (
+        "Check what tasks are currently open, claimed, or in progress in the "
+        "shared coordination pool. Pass agent_name to see only one agent's "
+        "tasks, or omit to see everyone's."
+    ),
+    GetActiveTasksArgs,
+)
+
+send_signal_schema = function_schema(
+    "send_signal",
+    "Send a direct message to another agent's inbox in the coordination pool.",
+    SendSignalArgs,
+)
+
+get_signals_schema = function_schema(
+    "get_signals",
+    (
+        "Check your inbox for unread messages other agents have sent you via "
+        "send_signal. Reading a message marks it read."
+    ),
+    GetSignalsArgs,
+)
+
 ALL_SCHEMAS = [
     delegate_to_atlas_schema,
     connect_to_atlas_schema,
@@ -165,6 +225,12 @@ ALL_SCHEMAS = [
     consult_agents_schema,
     enable_team_mode_schema,
     disable_team_mode_schema,
+    post_task_schema,
+    claim_task_schema,
+    update_task_status_schema,
+    get_active_tasks_schema,
+    send_signal_schema,
+    get_signals_schema,
 ]
 
 # ── Handlers ──────────────────────────────────────────────────────────────────
@@ -343,6 +409,97 @@ async def disable_team_mode_handler(params: FunctionCallParams) -> None:
     await params.result_callback("Team mode is off — back to just us.")
 
 
+def _make_post_task_handler(orchestrator: "VoiceOrchestrator"):
+    async def handler(params: FunctionCallParams) -> None:
+        args = PostTaskArgs(**params.arguments)
+
+        task_id = await asyncio.to_thread(
+            orchestrator.bundle.blackboard.post_task, args.description, agent_state.active
+        )
+        await params.result_callback(f"Posted task {task_id}.")
+    return handler
+
+
+def _make_claim_task_handler(orchestrator: "VoiceOrchestrator"):
+    async def handler(params: FunctionCallParams) -> None:
+        args = ClaimTaskArgs(**params.arguments)
+
+        claimed = await asyncio.to_thread(
+            orchestrator.bundle.blackboard.claim_task, args.task_id, agent_state.active
+        )
+        if claimed:
+            await params.result_callback(f"Claimed task {args.task_id}.")
+        else:
+            await params.result_callback(
+                f"Could not claim task {args.task_id} — already claimed or doesn't exist."
+            )
+    return handler
+
+
+def _make_update_task_status_handler(orchestrator: "VoiceOrchestrator"):
+    async def handler(params: FunctionCallParams) -> None:
+        args = UpdateTaskStatusArgs(**params.arguments)
+
+        updated = await asyncio.to_thread(
+            orchestrator.bundle.blackboard.update_task_status,
+            args.task_id, args.status, args.detail,
+        )
+        if updated:
+            await params.result_callback(f"Task {args.task_id} marked {args.status}.")
+        else:
+            await params.result_callback(f"No task found with id {args.task_id}.")
+    return handler
+
+
+def _make_get_active_tasks_handler(orchestrator: "VoiceOrchestrator"):
+    async def handler(params: FunctionCallParams) -> None:
+        args = GetActiveTasksArgs(**params.arguments)
+
+        tasks = await asyncio.to_thread(
+            orchestrator.bundle.blackboard.get_active_tasks, args.agent_name
+        )
+        if not tasks:
+            await params.result_callback("No active tasks found.")
+            return
+
+        lines = [
+            f"- ({task.task_id}) {task.description} "
+            f"[{task.status}, owner={task.owner_agent or 'unclaimed'}]"
+            for task in tasks
+        ]
+        await params.result_callback("\n".join(lines))
+    return handler
+
+
+def _make_send_signal_handler(orchestrator: "VoiceOrchestrator"):
+    async def handler(params: FunctionCallParams) -> None:
+        args = SendSignalArgs(**params.arguments)
+
+        signal_id = await asyncio.to_thread(
+            orchestrator.bundle.blackboard.send_signal,
+            agent_state.active, args.to_agent, args.payload,
+        )
+        await params.result_callback(f"Sent signal {signal_id} to {args.to_agent}.")
+    return handler
+
+
+def _make_get_signals_handler(orchestrator: "VoiceOrchestrator"):
+    async def handler(params: FunctionCallParams) -> None:
+        args = GetSignalsArgs(**params.arguments)
+        agent_name = args.agent_name or agent_state.active
+
+        signals = await asyncio.to_thread(
+            orchestrator.bundle.blackboard.get_signals_for, agent_name
+        )
+        if not signals:
+            await params.result_callback("No unread signals.")
+            return
+
+        lines = [f"- from {signal.from_agent}: {signal.payload}" for signal in signals]
+        await params.result_callback("\n".join(lines))
+    return handler
+
+
 # ── Wiring ────────────────────────────────────────────────────────────────────
 
 def setup(orchestrator: "VoiceOrchestrator") -> None:
@@ -406,5 +563,35 @@ def setup(orchestrator: "VoiceOrchestrator") -> None:
     llm.register_function(
         "disable_team_mode",
         disable_team_mode_handler,
+        cancel_on_interruption=False,
+    )
+    llm.register_function(
+        "post_task",
+        _make_post_task_handler(orchestrator),
+        cancel_on_interruption=False,
+    )
+    llm.register_function(
+        "claim_task",
+        _make_claim_task_handler(orchestrator),
+        cancel_on_interruption=False,
+    )
+    llm.register_function(
+        "update_task_status",
+        _make_update_task_status_handler(orchestrator),
+        cancel_on_interruption=False,
+    )
+    llm.register_function(
+        "get_active_tasks",
+        _make_get_active_tasks_handler(orchestrator),
+        cancel_on_interruption=False,
+    )
+    llm.register_function(
+        "send_signal",
+        _make_send_signal_handler(orchestrator),
+        cancel_on_interruption=False,
+    )
+    llm.register_function(
+        "get_signals",
+        _make_get_signals_handler(orchestrator),
         cancel_on_interruption=False,
     )

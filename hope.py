@@ -64,6 +64,7 @@ async def main():
         bundle.tracer.shutdown()
         await bundle.summarizer.flush()
         bundle.episodic_memory.close()
+        bundle.blackboard.close()
         atlas_team_member.voice.close()
 
 
