@@ -1,0 +1,93 @@
+"""Pydantic argument schemas for every tool in tools/registry.py.
+
+Single source of truth for each tool's parameters: FunctionSchema.properties/
+required (what HOPE's LLM sees) are derived from these via model_json_schema(),
+and handlers parse params.arguments through the same model instead of hand-
+indexing a raw dict.
+"""
+
+from pipecat.adapters.schemas.function_schema import FunctionSchema
+from pydantic import BaseModel, Field
+
+
+def function_schema(name: str, description: str, args_model: type[BaseModel]) -> FunctionSchema:
+    """Build a pipecat FunctionSchema from a pydantic model's JSON schema."""
+    json_schema = args_model.model_json_schema()
+    return FunctionSchema(
+        name=name,
+        description=description,
+        properties=json_schema.get("properties", {}),
+        required=json_schema.get("required", []),
+    )
+
+
+class DelegateToAtlasArgs(BaseModel):
+    task: str = Field(description="Natural language description of the filesystem task.")
+
+
+class ConnectToAtlasArgs(BaseModel):
+    pass
+
+
+class HandbackToHopeArgs(BaseModel):
+    pass
+
+
+class RecallMemoryArgs(BaseModel):
+    query: str = Field(description="Natural language description of what to recall.")
+    agent_name: str | None = Field(
+        default=None,
+        description=(
+            "Whose history to search: 'hope', 'atlas', or 'all'. "
+            "Omit to search your own history."
+        ),
+    )
+
+
+class RecallSemanticArgs(BaseModel):
+    query: str = Field(description="Natural language description of what to recall.")
+    agent_name: str | None = Field(
+        default=None,
+        description=(
+            "Whose private facts to search: 'hope' or 'atlas'. "
+            "Omit to search the shared pool everyone can see."
+        ),
+    )
+
+
+class SaveProcedureArgs(BaseModel):
+    name: str = Field(description="Short name for the procedure, e.g. 'restart audio service'.")
+    description: str = Field(description="One-line description of when this procedure applies.")
+    steps: list[str] = Field(description="Ordered list of steps that make up the procedure.")
+
+
+class RecallProcedureArgs(BaseModel):
+    query: str = Field(description="Natural language description of the task you're about to do.")
+    agent_name: str | None = Field(
+        default=None,
+        description="Whose procedures to search: 'hope' or 'atlas'. Omit to search your own.",
+    )
+
+
+class RecordProcedureOutcomeArgs(BaseModel):
+    name: str = Field(description="Name of the procedure, as returned by recall_procedure.")
+    success: bool = Field(description="Whether following the procedure worked this time.")
+
+
+class CheckPlansArgs(BaseModel):
+    agent_name: str | None = Field(
+        default=None,
+        description="Whose plans to check: 'hope', 'atlas', or 'all'. Omit to check your own.",
+    )
+    status: str | None = Field(
+        default=None,
+        description=(
+            "Filter by status: 'pending', 'completed', 'abandoned', or 'superseded'. "
+            "Omit to see pending plans."
+        ),
+    )
+
+
+class ConsultAgentsArgs(BaseModel):
+    agent_names: list[str] = Field(description="Names of the agents to consult, e.g. ['atlas'].")
+    message: str = Field(description="The question or task to send to each agent.")

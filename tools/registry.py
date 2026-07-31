@@ -1,7 +1,6 @@
 import asyncio
 
 
-from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.frames.frames import FunctionCallResultProperties
 from pipecat.services.llm_service import FunctionCallParams
 
@@ -10,204 +9,124 @@ from sub_agents.atlas.agent import Atlas
 
 from core.voice.agent_state import agent_state
 from core.voice.orchestrator import VoiceOrchestrator
+from tools.schema import (
+    CheckPlansArgs,
+    ConnectToAtlasArgs,
+    ConsultAgentsArgs,
+    DelegateToAtlasArgs,
+    HandbackToHopeArgs,
+    RecallMemoryArgs,
+    RecallProcedureArgs,
+    RecallSemanticArgs,
+    RecordProcedureOutcomeArgs,
+    SaveProcedureArgs,
+    function_schema,
+)
 
 atlas = Atlas()
 
 # ── Tool schemas exposed to HOPE's LLM ────────────────────────────────────────
 
-delegate_to_atlas_schema = FunctionSchema(
-    name="delegate_to_atlas",
-    description=(
+delegate_to_atlas_schema = function_schema(
+    "delegate_to_atlas",
+    (
         "Delegate a filesystem task to Atlas. Use whenever Pavan asks to create, "
         "read, edit, or delete files or folders. Pass a clear natural-language "
         "description of the task."
     ),
-    properties={
-        "task": {
-            "type": "string",
-            "description": "Natural language description of the filesystem task.",
-        }
-    },
-    required=["task"],
+    DelegateToAtlasArgs,
 )
 
-connect_to_atlas_schema = FunctionSchema(
-    name="connect_to_atlas",
-    description=(
+connect_to_atlas_schema = function_schema(
+    "connect_to_atlas",
+    (
         "Switch the active voice to Atlas so Pavan can speak directly with Atlas. "
         "Use when Pavan says 'connect me to Atlas', 'let me talk to Atlas', or similar."
     ),
-    properties={},
-    required=[],
+    ConnectToAtlasArgs,
 )
 
-handback_to_hope_schema = FunctionSchema(
-    name="handback_to_hope",
-    description=(
+handback_to_hope_schema = function_schema(
+    "handback_to_hope",
+    (
         "Hand the active voice back to HOPE. "
         "Use when Pavan says 'HOPE take over', 'back to HOPE', 'thanks Atlas', or similar."
     ),
-    properties={},
-    required=[],
+    HandbackToHopeArgs,
 )
 
-recall_memory_schema = FunctionSchema(
-    name="recall_memory",
-    description=(
+recall_memory_schema = function_schema(
+    "recall_memory",
+    (
         "Search past conversation history (episodic memory) for relevant context "
         "from earlier sessions. Defaults to searching your own history; pass "
         "agent_name to search a specific agent's history instead, or 'all' to "
         "search everyone's history."
     ),
-    properties={
-        "query": {
-            "type": "string",
-            "description": "Natural language description of what to recall.",
-        },
-        "agent_name": {
-            "type": "string",
-            "description": (
-                "Whose history to search: 'hope', 'atlas', or 'all'. "
-                "Omit to search your own history."
-            ),
-        },
-    },
-    required=["query"],
+    RecallMemoryArgs,
 )
 
-recall_semantic_schema = FunctionSchema(
-    name="recall_semantic",
-    description=(
+recall_semantic_schema = function_schema(
+    "recall_semantic",
+    (
         "Search durable facts and preferences (not conversation history — use "
         "recall_memory for that). Defaults to the shared pool everyone can see; "
         "pass agent_name to see only one agent's private facts."
     ),
-    properties={
-        "query": {
-            "type": "string",
-            "description": "Natural language description of what to recall.",
-        },
-        "agent_name": {
-            "type": "string",
-            "description": (
-                "Whose private facts to search: 'hope' or 'atlas'. "
-                "Omit to search the shared pool everyone can see."
-            ),
-        },
-    },
-    required=["query"],
+    RecallSemanticArgs,
 )
 
-save_procedure_schema = FunctionSchema(
-    name="save_procedure",
-    description=(
+save_procedure_schema = function_schema(
+    "save_procedure",
+    (
         "Save a reusable step-by-step procedure under your own name, so you can "
         "follow it again later instead of figuring it out from scratch. Only call "
         "this when Pavan explicitly confirms he wants something remembered as a "
         "procedure — never save one unprompted."
     ),
-    properties={
-        "name": {
-            "type": "string",
-            "description": "Short name for the procedure, e.g. 'restart audio service'.",
-        },
-        "description": {
-            "type": "string",
-            "description": "One-line description of when this procedure applies.",
-        },
-        "steps": {
-            "type": "array",
-            "items": {"type": "string"},
-            "description": "Ordered list of steps that make up the procedure.",
-        },
-    },
-    required=["name", "description", "steps"],
+    SaveProcedureArgs,
 )
 
-recall_procedure_schema = FunctionSchema(
-    name="recall_procedure",
-    description=(
+recall_procedure_schema = function_schema(
+    "recall_procedure",
+    (
         "Look up a saved procedure for a task you might have done before. "
         "Defaults to your own saved procedures; pass agent_name to check a "
         "specific agent's instead. Returns steps plus success/failure counts so "
         "you can judge how much to trust it before following it."
     ),
-    properties={
-        "query": {
-            "type": "string",
-            "description": "Natural language description of the task you're about to do.",
-        },
-        "agent_name": {
-            "type": "string",
-            "description": "Whose procedures to search: 'hope' or 'atlas'. Omit to search your own.",
-        },
-    },
-    required=["query"],
+    RecallProcedureArgs,
 )
 
-record_procedure_outcome_schema = FunctionSchema(
-    name="record_procedure_outcome",
-    description=(
+record_procedure_outcome_schema = function_schema(
+    "record_procedure_outcome",
+    (
         "Report whether a procedure you just followed (via recall_procedure) "
         "actually worked. Keeps its success/failure count accurate so future "
         "recalls reflect how trustworthy it really is."
     ),
-    properties={
-        "name": {
-            "type": "string",
-            "description": "Name of the procedure, as returned by recall_procedure.",
-        },
-        "success": {
-            "type": "boolean",
-            "description": "Whether following the procedure worked this time.",
-        },
-    },
-    required=["name", "success"],
+    RecordProcedureOutcomeArgs,
 )
 
-consult_agents_schema = FunctionSchema(
-    name="consult_agents",
-    description=(
+consult_agents_schema = function_schema(
+    "consult_agents",
+    (
         "Ask multiple agents the same question or task concurrently and gather all "
         "their replies at once, instead of contacting them one at a time. Use when "
         "you need input from more than one agent to answer Pavan."
     ),
-    properties={
-        "agent_names": {
-            "type": "array",
-            "items": {"type": "string"},
-            "description": "Names of the agents to consult, e.g. ['atlas'].",
-        },
-        "message": {
-            "type": "string",
-            "description": "The question or task to send to each agent.",
-        },
-    },
-    required=["agent_names", "message"],
+    ConsultAgentsArgs,
 )
 
-check_plans_schema = FunctionSchema(
-    name="check_plans",
-    description=(
+check_plans_schema = function_schema(
+    "check_plans",
+    (
         "Check on tasks that were planned — what's still pending, or what's "
         "already completed/abandoned. Defaults to your own pending plans; pass "
         "agent_name to check a specific agent's instead, or 'all' for everyone's. "
         "Pass status to see resolved plans instead of just pending ones."
     ),
-    properties={
-        "agent_name": {
-            "type": "string",
-            "description": "Whose plans to check: 'hope', 'atlas', or 'all'. Omit to check your own.",
-        },
-        "status": {
-            "type": "string",
-            "description": (
-                "Filter by status: 'pending', 'completed', 'abandoned', or 'superseded'. "
-                "Omit to see pending plans."
-            ),
-        },
-    },
-    required=[],
+    CheckPlansArgs,
 )
 
 ALL_SCHEMAS = [
@@ -226,16 +145,17 @@ ALL_SCHEMAS = [
 # ── Handlers ──────────────────────────────────────────────────────────────────
 
 async def delegate_to_atlas_handler(params: FunctionCallParams) -> None:
-    task = params.arguments["task"]
+    args = DelegateToAtlasArgs(**params.arguments)
     await params.result_callback(
         "Task received. Atlas is on it.",
         properties=FunctionCallResultProperties(is_final=False),
     )
-    asyncio.create_task(atlas.run(task, params.result_callback))
+    asyncio.create_task(atlas.run(args.task, params.result_callback))
 
 
 def _make_connect_handler(orchestrator: "VoiceOrchestrator"):
     async def handler(params: FunctionCallParams) -> None:
+        ConnectToAtlasArgs(**params.arguments)
         await orchestrator.switch_to("atlas")
         await params.result_callback("Connecting you to Atlas now.")
     return handler
@@ -243,6 +163,7 @@ def _make_connect_handler(orchestrator: "VoiceOrchestrator"):
 
 def _make_handback_handler(orchestrator: "VoiceOrchestrator"):
     async def handler(params: FunctionCallParams) -> None:
+        HandbackToHopeArgs(**params.arguments)
         await orchestrator.switch_to("hope")
         await params.result_callback("HOPE is back.")
     return handler
@@ -250,12 +171,12 @@ def _make_handback_handler(orchestrator: "VoiceOrchestrator"):
 
 def _make_recall_memory_handler(orchestrator: "VoiceOrchestrator"):
     async def handler(params: FunctionCallParams) -> None:
-        query = params.arguments["query"]
-        agent_name = params.arguments.get("agent_name") or agent_state.active
+        args = RecallMemoryArgs(**params.arguments)
+        agent_name = args.agent_name or agent_state.active
         agent = None if agent_name == "all" else agent_name
 
         episodes = await asyncio.to_thread(
-            orchestrator.bundle.episodic_memory.query, query, 5, agent
+            orchestrator.bundle.episodic_memory.query, args.query, 5, agent
         )
 
         if not episodes:
@@ -269,11 +190,10 @@ def _make_recall_memory_handler(orchestrator: "VoiceOrchestrator"):
 
 def _make_recall_semantic_handler(orchestrator: "VoiceOrchestrator"):
     async def handler(params: FunctionCallParams) -> None:
-        query = params.arguments["query"]
-        agent_name = params.arguments.get("agent_name")  # omitted -> shared pool, unlike recall_memory
+        args = RecallSemanticArgs(**params.arguments)  # omitted agent_name -> shared pool, unlike recall_memory
 
         facts = await asyncio.to_thread(
-            orchestrator.bundle.semantic_memory.query, query, 5, agent_name
+            orchestrator.bundle.semantic_memory.query, args.query, 5, args.agent_name
         )
 
         if not facts:
@@ -289,14 +209,12 @@ def _make_recall_semantic_handler(orchestrator: "VoiceOrchestrator"):
 
 def _make_save_procedure_handler(orchestrator: "VoiceOrchestrator"):
     async def handler(params: FunctionCallParams) -> None:
-        name = params.arguments["name"]
-        description = params.arguments["description"]
-        steps = params.arguments["steps"]
+        args = SaveProcedureArgs(**params.arguments)
 
         try:
             procedure = await asyncio.to_thread(
                 orchestrator.bundle.procedural_memory.save,
-                agent_state.active, name, description, steps,
+                agent_state.active, args.name, args.description, args.steps,
             )
         except ValueError as exc:
             await params.result_callback(str(exc))
@@ -310,11 +228,11 @@ def _make_save_procedure_handler(orchestrator: "VoiceOrchestrator"):
 
 def _make_recall_procedure_handler(orchestrator: "VoiceOrchestrator"):
     async def handler(params: FunctionCallParams) -> None:
-        query = params.arguments["query"]
-        agent_name = params.arguments.get("agent_name") or agent_state.active
+        args = RecallProcedureArgs(**params.arguments)
+        agent_name = args.agent_name or agent_state.active
 
         procedures = await asyncio.to_thread(
-            orchestrator.bundle.procedural_memory.recall, query, agent_name, 3
+            orchestrator.bundle.procedural_memory.recall, args.query, agent_name, 3
         )
 
         if not procedures:
@@ -335,13 +253,12 @@ def _make_recall_procedure_handler(orchestrator: "VoiceOrchestrator"):
 
 def _make_record_procedure_outcome_handler(orchestrator: "VoiceOrchestrator"):
     async def handler(params: FunctionCallParams) -> None:
-        name = params.arguments["name"]
-        success = params.arguments["success"]
+        args = RecordProcedureOutcomeArgs(**params.arguments)
 
         try:
             procedure = await asyncio.to_thread(
                 orchestrator.bundle.procedural_memory.record_outcome,
-                agent_state.active, name, success,
+                agent_state.active, args.name, args.success,
             )
         except ValueError as exc:
             await params.result_callback(str(exc))
@@ -356,9 +273,10 @@ def _make_record_procedure_outcome_handler(orchestrator: "VoiceOrchestrator"):
 
 def _make_check_plans_handler(orchestrator: "VoiceOrchestrator"):
     async def handler(params: FunctionCallParams) -> None:
-        agent_name = params.arguments.get("agent_name") or agent_state.active
+        args = CheckPlansArgs(**params.arguments)
+        agent_name = args.agent_name or agent_state.active
         agent = None if agent_name == "all" else agent_name
-        status = params.arguments.get("status") or "pending"
+        status = args.status or "pending"
 
         matching_plans = await asyncio.to_thread(
             orchestrator.bundle.episodic_memory.list_plans, agent, status
@@ -375,11 +293,10 @@ def _make_check_plans_handler(orchestrator: "VoiceOrchestrator"):
 
 def _make_consult_agents_handler(orchestrator: "VoiceOrchestrator"):
     async def handler(params: FunctionCallParams) -> None:
-        agent_names = params.arguments["agent_names"]
-        message = params.arguments["message"]
+        args = ConsultAgentsArgs(**params.arguments)
 
         try:
-            replies = await orchestrator.broadcast(agent_state.active, agent_names, message)
+            replies = await orchestrator.broadcast(agent_state.active, args.agent_names, args.message)
         except KeyError as exc:
             await params.result_callback(str(exc))
             return
