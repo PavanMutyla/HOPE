@@ -165,6 +165,30 @@ record_procedure_outcome_schema = FunctionSchema(
     required=["name", "success"],
 )
 
+check_plans_schema = FunctionSchema(
+    name="check_plans",
+    description=(
+        "Check on tasks that were planned — what's still pending, or what's "
+        "already completed/abandoned. Defaults to your own pending plans; pass "
+        "agent_name to check a specific agent's instead, or 'all' for everyone's. "
+        "Pass status to see resolved plans instead of just pending ones."
+    ),
+    properties={
+        "agent_name": {
+            "type": "string",
+            "description": "Whose plans to check: 'hope', 'atlas', or 'all'. Omit to check your own.",
+        },
+        "status": {
+            "type": "string",
+            "description": (
+                "Filter by status: 'pending', 'completed', 'abandoned', or 'superseded'. "
+                "Omit to see pending plans."
+            ),
+        },
+    },
+    required=[],
+)
+
 ALL_SCHEMAS = [
     delegate_to_atlas_schema,
     connect_to_atlas_schema,
@@ -174,6 +198,7 @@ ALL_SCHEMAS = [
     save_procedure_schema,
     recall_procedure_schema,
     record_procedure_outcome_schema,
+    check_plans_schema,
 ]
 
 # ── Handlers ──────────────────────────────────────────────────────────────────
@@ -307,6 +332,25 @@ def _make_record_procedure_outcome_handler(orchestrator: "VoiceOrchestrator"):
     return handler
 
 
+def _make_check_plans_handler(orchestrator: "VoiceOrchestrator"):
+    async def handler(params: FunctionCallParams) -> None:
+        agent_name = params.arguments.get("agent_name") or agent_state.active
+        agent = None if agent_name == "all" else agent_name
+        status = params.arguments.get("status") or "pending"
+
+        matching_plans = await asyncio.to_thread(
+            orchestrator.bundle.episodic_memory.list_plans, agent, status
+        )
+
+        if not matching_plans:
+            await params.result_callback(f"No {status} plans found.")
+            return
+
+        lines = [f"- ({plan.agent}) {plan.description} [{plan.status}]" for plan in matching_plans]
+        await params.result_callback("\n".join(lines))
+    return handler
+
+
 # ── Wiring ────────────────────────────────────────────────────────────────────
 
 def setup(orchestrator: "VoiceOrchestrator") -> None:
@@ -350,5 +394,10 @@ def setup(orchestrator: "VoiceOrchestrator") -> None:
     llm.register_function(
         "record_procedure_outcome",
         _make_record_procedure_outcome_handler(orchestrator),
+        cancel_on_interruption=False,
+    )
+    llm.register_function(
+        "check_plans",
+        _make_check_plans_handler(orchestrator),
         cancel_on_interruption=False,
     )

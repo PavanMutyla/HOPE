@@ -167,3 +167,60 @@ async def test_busy_atlas_never_attempts_a_write(atlas, episodic_memory):
     await atlas.run("anything", AsyncMock())
 
     assert episodic_memory.query("anything", k=5, agent="atlas") == []
+
+
+# ── Plan tracking ──────────────────────────────────────────────────────
+
+
+@pytest.mark.integration
+async def test_completed_task_resolves_its_plan(atlas, episodic_memory):
+    atlas._client.chat.completions.create = AsyncMock(
+        return_value=_fake_response("stop", content="Listed 3 files.")
+    )
+
+    await atlas.run("list the files", AsyncMock())
+
+    [plan] = episodic_memory.list_plans(agent="atlas", status="completed")
+    assert plan.description == "list the files"
+    assert plan.resulting_episode_id is not None
+
+    [episode] = episodic_memory.query("list the files", k=5, agent="atlas")
+    assert plan.resulting_episode_id == episode.id
+
+
+@pytest.mark.integration
+async def test_failed_task_abandons_its_plan(atlas, episodic_memory):
+    atlas._client.chat.completions.create = AsyncMock(side_effect=RuntimeError("boom"))
+
+    await atlas.run("this will fail", AsyncMock())
+
+    [plan] = episodic_memory.list_plans(agent="atlas", status="abandoned")
+    assert plan.description == "this will fail"
+    assert plan.resulting_episode_id is None
+
+
+@pytest.mark.integration
+async def test_busy_atlas_never_creates_a_plan(atlas, episodic_memory):
+    atlas._busy = True
+
+    await atlas.run("anything", AsyncMock())
+
+    assert episodic_memory.list_plans(agent="atlas") == []
+
+
+@pytest.mark.integration
+async def test_plan_creation_failure_does_not_break_result_callback():
+    """A broken plan-tracking write must never swallow the task's actual
+    result, same guarantee as the episodic/semantic failure cases above."""
+    broken_memory = MagicMock()
+    broken_memory.create_plan.side_effect = RuntimeError("db is locked")
+    atlas = Atlas(episodic_memory=broken_memory, semantic_memory=MagicMock())
+    atlas._client = MagicMock()
+    atlas._client.chat.completions.create = AsyncMock(
+        return_value=_fake_response("stop", content="All done.")
+    )
+    result_callback = AsyncMock()
+
+    await atlas.run("do the thing", result_callback)
+
+    result_callback.assert_called_once_with("All done.")

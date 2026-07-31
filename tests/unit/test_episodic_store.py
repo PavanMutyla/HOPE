@@ -194,3 +194,72 @@ def test_query_without_agent_returns_episodes_from_any_agent(memory):
     results = memory.query("deployment steps", k=5)
 
     assert {e.agent for e in results} == {"hope", "atlas"}
+
+
+# ── Plan tracking ──────────────────────────────────────────────────────
+
+
+@pytest.mark.unit
+def test_create_plan_returns_prefixed_ulid(memory):
+    plan_id = memory.create_plan("atlas", "clean up the notes folder")
+
+    assert plan_id.startswith("plan_")
+
+
+@pytest.mark.unit
+def test_get_plan_round_trips(memory):
+    plan_id = memory.create_plan("atlas", "clean up the notes folder")
+
+    plan = memory.get_plan(plan_id)
+
+    assert plan.agent == "atlas"
+    assert plan.description == "clean up the notes folder"
+    assert plan.status == "pending"
+
+
+@pytest.mark.unit
+def test_resolve_plan_links_the_resulting_episode(memory):
+    plan_id = memory.create_plan("atlas", "list the files")
+    episode_id = memory.write(
+        agent="atlas", session_id="sess-1", reason="task_complete", span_turns=1,
+        summary="did it", messages=[{"role": "user", "content": "list files"}],
+    )
+
+    memory.resolve_plan(plan_id, episode_id)
+
+    plan = memory.get_plan(plan_id)
+    assert plan.status == "completed"
+    assert plan.resulting_episode_id == episode_id
+
+
+@pytest.mark.unit
+def test_abandon_plan_marks_it_abandoned(memory):
+    plan_id = memory.create_plan("atlas", "reorganize downloads")
+
+    memory.abandon_plan(plan_id)
+
+    assert memory.get_plan(plan_id).status == "abandoned"
+
+
+@pytest.mark.unit
+def test_supersede_plan_points_at_the_replacement(memory):
+    old_plan_id = memory.create_plan("atlas", "backup the old way")
+    new_plan_id = memory.create_plan("atlas", "backup the new way")
+
+    memory.supersede_plan(old_plan_id, new_plan_id)
+
+    old_plan = memory.get_plan(old_plan_id)
+    assert old_plan.status == "superseded"
+    assert old_plan.superseded_by == new_plan_id
+
+
+@pytest.mark.unit
+def test_list_plans_filters_by_agent_and_status(memory):
+    pending_id = memory.create_plan("atlas", "still pending")
+    done_id = memory.create_plan("atlas", "already done")
+    memory.abandon_plan(done_id)
+    memory.create_plan("hope", "a hope plan")
+
+    atlas_pending = memory.list_plans(agent="atlas", status="pending")
+
+    assert [p.id for p in atlas_pending] == [pending_id]
