@@ -1,7 +1,6 @@
 import uuid
 from dataclasses import dataclass
 
-from loguru import logger
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
@@ -26,6 +25,8 @@ from core.voice.agent import VoiceAgent
 from core.voice.context_meter import ContextMeter, resolve_context_limit
 from core.voice.kokoro_cache import ensure_kokoro_files, recover_corrupted_kokoro_cache
 from core.voice.summarizer import ContextSummarizer
+from core.voice.team_broadcast import TeamBroadcastObserver
+from core.voice.team_registry import team_registry
 from core.observability import LangfuseObserver, LangfuseTracer
 from core.status import StatusMonitor, StatusPanel
 from memory.episodic_memory.store import EpisodicMemory
@@ -124,6 +125,10 @@ def build_pipeline(agent: VoiceAgent, tools: list[FunctionSchema]) -> VoicePipel
     pre_trace = LangfuseObserver(tracer)
     post_trace = LangfuseObserver(tracer)
 
+    team_broadcast = TeamBroadcastObserver(
+        team_registry, AsyncOpenAI(api_key=settings.openai_api_key)
+    )
+
     meter = ContextMeter(
         context_limit=resolve_context_limit(
             f"{settings.llm_provider}/{settings.llm_model}", settings.llm_context_limit
@@ -146,6 +151,7 @@ def build_pipeline(agent: VoiceAgent, tools: list[FunctionSchema]) -> VoicePipel
     pipeline = Pipeline([
         transport.input(),
         stt,
+        team_broadcast,
         pre_monitor,
         pre_trace,
         context_aggregator.user(),
