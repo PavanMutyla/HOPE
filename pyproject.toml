@@ -21,6 +21,7 @@ python-ulid = "^3.1.0"
 mem0ai = "^2.0.14"
 pyyaml = "^6.0"
 reflex = "^0.9.8"
+httpx = "^0.28.1"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "9.0.3"

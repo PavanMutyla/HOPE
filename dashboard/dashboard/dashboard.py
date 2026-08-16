@@ -9,6 +9,7 @@ from dashboard.components.chat_panel import chat_panel
 from dashboard.components.corkboard import corkboard
 from dashboard.components.primitives import pointer_div
 from dashboard.components.sidebar import sidebar
+from dashboard.components.terminal_panel import terminal_panel
 from dashboard.state import DashboardState
 
 
@@ -17,8 +18,10 @@ def index() -> rx.Component:
         sidebar(),
         corkboard(),
         chat_panel(),
+        terminal_panel(),
         on_mouse_move=DashboardState.on_root_mouse_move,
         on_mouse_up=DashboardState.on_root_mouse_up,
+        on_mount=DashboardState.on_page_load,
         style={
             "position": "relative", "width": "100vw", "height": "100vh", "overflow": "hidden",
             "background": s.BG, "fontFamily": s.FONT_SANS, "color": s.TEXT, "userSelect": "none",

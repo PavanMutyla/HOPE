@@ -1,28 +1,42 @@
-"""Dashboard state — Phase 1 (mock data, no backend). Ported from the
-Component class in the Claude Design prototype's `HOPE Dashboard.dc.html`;
-event handler names and behavior match 1:1 where the prototype's React
-setState pattern translates directly to Reflex state mutation.
+"""Dashboard state. The chat panel is still Phase 1 (mock data, no backend),
+ported from the Component class in the Claude Design prototype's `HOPE
+Dashboard.dc.html`. The corkboard notes are real: Today/Planned/Pending/Quick
+notes and Location/Weather are backed by the shared board (memory/board/) —
+the same tools HOPE and Atlas call by voice.
 """
+
+import dashboard._pathfix  # noqa: F401 — sys.path side effect, must run first
 
 import asyncio
 import time
+from pathlib import Path
 
 import reflex as rx
 
-from dashboard.data import AGENT_META, INITIAL_CHATS, INITIAL_NOTES, MOCK_ATTACHMENT_NAMES
+from dashboard.data import AGENT_META, INITIAL_CHATS, MOCK_ATTACHMENT_NAMES, NOTE_LAYOUT
+from memory.board import live as board_live
+from memory.board.store import Board
+from settings import settings
 
 REGENERATE_TEXT = "Here's another take on that — regenerated response for the prototype."
 MOCK_REPLY_TEXT = "Noted — I'll factor that in. (This is a mocked response for the prototype.)"
+
+_board = Board()
+_REFRESH_SECONDS = 15
+_LOG_REFRESH_SECONDS = 3
+_LOG_TAIL_LINES = 200
 
 
 class DashboardState(rx.State):
     # Sidebar
     sidebar_collapsed: bool = False
 
-    # Chat panel chrome
+    # Chat panel chrome — positioned clear of the corkboard notes (which
+    # occupy roughly screen-x 300-780 with the sidebar expanded), not on
+    # top of them.
     panel_open: bool = True
-    panel_x: int = 560
-    panel_y: int = 50
+    panel_x: int = 820
+    panel_y: int = 40
     model: str = "HOPE"
     model_menu_open: bool = False
     attach_menu_open: bool = False
@@ -41,8 +55,9 @@ class DashboardState(rx.State):
     editing_msg_id: str = ""
     edit_drafts: dict[str, str] = {}
 
-    # Corkboard notes
-    notes: list[dict] = INITIAL_NOTES
+    # Corkboard notes — layout (position/paper/etc.) is static; content is
+    # merged in live from the shared board by load_board().
+    notes: list[dict] = NOTE_LAYOUT
 
     # Drag tracking (panel XOR one note at a time, matching the prototype)
     dragging_note_id: str = ""
@@ -51,6 +66,16 @@ class DashboardState(rx.State):
     dragging_panel: bool = False
     _panel_drag_start: tuple[int, int] = (0, 0)
     _panel_drag_orig: tuple[int, int] = (0, 0)
+
+    # Terminal (HOPE log tail) panel — under the notes column, clear of both
+    # the notes and the chat panel (which sits to the right, see panel_x).
+    terminal_open: bool = True
+    terminal_x: int = 300
+    terminal_y: int = 670
+    terminal_lines: list[str] = []
+    dragging_terminal: bool = False
+    _terminal_drag_start: tuple[int, int] = (0, 0)
+    _terminal_drag_orig: tuple[int, int] = (0, 0)
 
     # ---- computed ----
 
@@ -184,22 +209,112 @@ class DashboardState(rx.State):
         self._update_chat(chat_id, lambda c: {**c, "messages": [*c["messages"], reply]})
         self.is_thinking = False
 
-    @rx.event
-    def toggle_task(self, note_id: str, idx: int):
-        def flip(n):
-            if n["id"] != note_id:
-                return n
-            tasks = list(n["tasks"])
-            tasks[idx] = {**tasks[idx], "done": not tasks[idx]["done"]}
-            return {**n, "tasks": tasks}
-
-        self.notes = [flip(n) for n in self.notes]
+    # ---- shared board (real, DB-backed) ----
 
     @rx.event
-    def edit_note_content(self, note_id: str, value: str):
-        self.notes = [
-            {**n, "content": value} if n["id"] == note_id else n for n in self.notes
-        ]
+    async def load_board(self):
+        """Fetch current board state and merge it into `self.notes`, leaving
+        each note's layout (x/y/rotate/paper/tape/pin/title) untouched — only
+        overwrites the content fields, so a dragged position survives a
+        refresh."""
+        today = await asyncio.to_thread(_board.list_items, "today")
+        planned = await asyncio.to_thread(_board.list_items, "planned")
+        pending = await asyncio.to_thread(_board.list_items, "pending")
+        quick_note = await asyncio.to_thread(_board.get_quick_note)
+        location = await board_live.get_location_and_time()
+        try:
+            weather = await board_live.get_weather()
+        except Exception:
+            weather = None
+
+        tasks_by_list = {"today": today, "planned": planned, "pending": pending}
+
+        def merge(n: dict) -> dict:
+            if n["type"] == "location":
+                lat, lon = location["lat"], location["lon"]
+                ns, ew = ("N" if lat >= 0 else "S"), ("E" if lon >= 0 else "W")
+                return {
+                    **n,
+                    "location_city": location["city"],
+                    "location_detail": f"{abs(lat):.2f}{ns}, {abs(lon):.2f}{ew}",
+                    "location_time": f"{location['local_time']} · {location['local_date']}",
+                }
+            if n["type"] == "weather":
+                if weather is None:
+                    return n
+                return {
+                    **n,
+                    "temp": f"{weather['temp_c']}°C",
+                    "condition": weather["condition"],
+                    "hi": f"{weather['hi_c']}°",
+                    "lo": f"{weather['lo_c']}°",
+                    "wind": f"{weather['wind_kmh']} km/h",
+                }
+            if n["type"] == "tasks":
+                items = tasks_by_list[n["list_type"]]
+                return {
+                    **n,
+                    "tasks": [
+                        {"id": i.id, "text": i.text, "done": i.done, "agent": i.agent}
+                        for i in items
+                    ],
+                }
+            if n["type"] == "notes":
+                return {**n, "content": quick_note.content, "note_agent": quick_note.agent}
+            return n
+
+        self.notes = [merge(n) for n in self.notes]
+
+    @rx.event
+    async def on_page_load(self):
+        await self.load_board()
+        await self.load_terminal()
+        return [DashboardState.refresh_loop, DashboardState.log_refresh_loop]
+
+    @rx.event(background=True)
+    async def refresh_loop(self):
+        while True:
+            await asyncio.sleep(_REFRESH_SECONDS)
+            async with self:
+                await self.load_board()
+
+    # ---- terminal (HOPE log tail) ----
+
+    @rx.event
+    async def load_terminal(self):
+        path = Path(settings.hope_log_path)
+        if not path.exists():
+            self.terminal_lines = ["No logs yet — start hope.py to see live activity here."]
+            return
+        lines = await asyncio.to_thread(path.read_text)
+        self.terminal_lines = lines.splitlines()[-_LOG_TAIL_LINES:]
+
+    @rx.event(background=True)
+    async def log_refresh_loop(self):
+        while True:
+            await asyncio.sleep(_LOG_REFRESH_SECONDS)
+            async with self:
+                await self.load_terminal()
+
+    @rx.event
+    def close_terminal(self):
+        self.terminal_open = False
+
+    @rx.event
+    def start_terminal_drag(self, info: dict):
+        self.dragging_terminal = True
+        self._terminal_drag_start = (info["client_x"], info["client_y"])
+        self._terminal_drag_orig = (self.terminal_x, self.terminal_y)
+
+    @rx.event
+    async def toggle_task(self, item_id: int):
+        await asyncio.to_thread(_board.toggle_item, item_id, settings.user_name)
+        await self.load_board()
+
+    @rx.event
+    async def edit_note_content(self, value: str):
+        await asyncio.to_thread(_board.update_quick_note, value, settings.user_name)
+        await self.load_board()
 
     # ---- message actions ----
 
@@ -308,8 +423,14 @@ class DashboardState(rx.State):
             ox, oy = self._panel_drag_orig
             self.panel_x = ox + (info["client_x"] - sx)
             self.panel_y = oy + (info["client_y"] - sy)
+        elif self.dragging_terminal:
+            sx, sy = self._terminal_drag_start
+            ox, oy = self._terminal_drag_orig
+            self.terminal_x = ox + (info["client_x"] - sx)
+            self.terminal_y = oy + (info["client_y"] - sy)
 
     @rx.event
     def on_root_mouse_up(self, info: dict):
         self.dragging_note_id = ""
         self.dragging_panel = False
+        self.dragging_terminal = False

@@ -9,6 +9,7 @@ from openai import AsyncOpenAI
 
 from sub_agents.atlas.prompt import ATLAS_PROMPT
 from sub_agents.atlas.voice_prompt import ATLAS_VOICE_PROMPT
+from sub_agents.atlas import board_tools
 from sub_agents.atlas import tools as fs
 from core.voice.agent import VoiceAgent
 from memory.episodic_memory.store import EpisodicMemory
@@ -24,6 +25,7 @@ _TOOL_DISPATCH: dict[str, Callable] = {
     "create_directory": fs.create_directory,
     "delete_directory": fs.delete_directory,
     "delete_all_in_directory": fs.delete_all_in_directory,
+    **board_tools.BOARD_TOOL_DISPATCH,
 }
 
 ResultCallback = Callable[[str], Awaitable[None]]
@@ -92,7 +94,7 @@ class Atlas:
             response = await self._client.chat.completions.create(
                 model=settings.atlas_llm_model,
                 messages=messages,
-                tools=fs.TOOL_SCHEMAS,
+                tools=fs.TOOL_SCHEMAS + board_tools.BOARD_TOOL_SCHEMAS,
                 tool_choice="auto",
             )
 

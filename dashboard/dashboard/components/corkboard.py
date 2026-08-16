@@ -4,8 +4,21 @@ from dashboard import styles as s
 from dashboard.components.primitives import pointer_div
 from dashboard.state import DashboardState
 
+# Board rows store the raw agent_state.active value ("hope"/"atlas") or
+# settings.user_name for dashboard-direct edits — display nicely without
+# changing what's stored, so it stays consistent with agent_state's own
+# lowercase convention.
+_AGENT_DISPLAY = {"hope": "HOPE", "atlas": "Atlas"}
 
-def _task_row(note: rx.Var[dict], task: rx.Var[dict], idx: rx.Var[int]) -> rx.Component:
+
+def _display_agent(agent: rx.Var[str]) -> rx.Var[str]:
+    return rx.cond(
+        agent == "hope", _AGENT_DISPLAY["hope"],
+        rx.cond(agent == "atlas", _AGENT_DISPLAY["atlas"], agent),
+    )
+
+
+def _task_row(task: rx.Var[dict], idx: rx.Var[int]) -> rx.Component:
     return rx.el.div(
         rx.el.div(
             rx.cond(task["done"], "✓", ""),
@@ -19,14 +32,14 @@ def _task_row(note: rx.Var[dict], task: rx.Var[dict], idx: rx.Var[int]) -> rx.Co
             },
         ),
         rx.el.div(
-            task["text"],
+            f"{task['text']} ({_display_agent(task['agent'])})",
             style={
                 "fontSize": "19px", "lineHeight": 1.2,
                 "opacity": rx.cond(task["done"], 0.55, 1),
                 "textDecoration": rx.cond(task["done"], "line-through", "none"),
             },
         ),
-        on_click=DashboardState.toggle_task(note["id"], idx),
+        on_click=DashboardState.toggle_task(task["id"]),
         style={"display": "flex", "alignItems": "flex-start", "gap": "8px", "padding": "4px 0", "cursor": "pointer"},
     )
 
@@ -38,6 +51,7 @@ def _note_body(note: rx.Var[dict]) -> rx.Component:
             rx.fragment(
                 rx.el.div(note["location_city"], style={"fontSize": "23px", "fontWeight": 600}),
                 rx.el.div(note["location_detail"], style={"fontSize": "17px", "opacity": 0.75, "marginTop": "2px"}),
+                rx.el.div(note["location_time"], style={"fontSize": "16px", "opacity": 0.7, "marginTop": "6px"}),
             ),
         ),
         rx.cond(
@@ -58,25 +72,34 @@ def _note_body(note: rx.Var[dict]) -> rx.Component:
         ),
         rx.cond(
             note["type"] == "tasks",
-            rx.foreach(note["tasks"].to(list[dict]), lambda task, idx: _task_row(note, task, idx)),
+            rx.foreach(note["tasks"].to(list[dict]), _task_row),
         ),
         rx.cond(
             note["type"] == "notes",
-            rx.debounce_input(
-                rx.el.textarea(
-                    value=note["content"],
-                    on_change=DashboardState.edit_note_content(note["id"]),
-                    placeholder="jot something down...",
-                    style={
-                        "width": "100%", "minHeight": "90px", "background": "transparent",
-                        "border": "none", "outline": "none", "resize": "vertical",
-                        "fontFamily": s.FONT_HAND, "fontSize": "19px", "color": s.INK, "lineHeight": 1.3,
-                    },
+            rx.fragment(
+                rx.debounce_input(
+                    rx.el.textarea(
+                        value=note["content"],
+                        on_change=DashboardState.edit_note_content,
+                        placeholder="jot something down...",
+                        style={
+                            "width": "100%", "minHeight": "90px", "background": "transparent",
+                            "border": "none", "outline": "none", "resize": "vertical",
+                            "fontFamily": s.FONT_HAND, "fontSize": "19px", "color": s.INK, "lineHeight": 1.3,
+                        },
+                    ),
+                    debounce_timeout=300,
                 ),
-                debounce_timeout=300,
+                rx.cond(
+                    note["note_agent"] != "",
+                    rx.el.div(
+                        f"last edited by {_display_agent(note['note_agent'])}",
+                        style={"fontSize": "13px", "opacity": 0.55, "marginTop": "4px"},
+                    ),
+                ),
             ),
         ),
-        style={"padding": "2px 18px 18px", "fontFamily": s.FONT_HAND, "color": s.INK},
+        style={"padding": "2px 18px 18px", "fontFamily": s.FONT_HAND, "color": s.INK, "userSelect": "text", "cursor": "text"},
     )
 
 
@@ -106,7 +129,7 @@ def _note_card(note: rx.Var[dict]) -> rx.Component:
         pointer_div(
             note["title"],
             on_mouse_down=DashboardState.start_note_drag(note["id"]),
-            style={"padding": "16px 18px 4px", "cursor": "grab", "fontFamily": s.FONT_HAND, "fontSize": "20px", "fontWeight": 700, "color": s.INK},
+            style={"padding": "16px 18px 4px", "cursor": "grab", "fontFamily": s.FONT_HAND, "fontSize": "20px", "fontWeight": 700, "color": s.INK, "userSelect": "none"},
         ),
         _note_body(note),
         style={

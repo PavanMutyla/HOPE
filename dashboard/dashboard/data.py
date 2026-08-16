@@ -19,60 +19,39 @@ MOCK_ATTACHMENT_NAMES = {
     "Link": "reference-link",
 }
 
-INITIAL_NOTES = [
+NOTE_LAYOUT = [
     {
         "id": "n1", "type": "location", "title": "Location",
         "paper": "#fdf3c4", "tape": "#f2e29a", "pin": "tape",
         "rotate": -2, "x": 40, "y": 40, "w": 240,
-        "location_city": "Austin, TX",
-        "location_detail": "home network · 30.27N, 97.74W",
+        "location_city": "", "location_detail": "", "location_time": "",
     },
     {
         "id": "n2", "type": "weather", "title": "Weather",
         "paper": "#d5ecfb", "tape": "#b9d7ec", "pin": "pin",
         "rotate": 2, "x": 290, "y": 40, "w": 230,
-        "temp": "81°F", "condition": "Partly Cloudy",
-        "hi": "88°", "lo": "71°", "wind": "6mph NW",
+        "temp": "", "condition": "", "hi": "", "lo": "", "wind": "",
     },
     {
-        "id": "n3", "type": "tasks", "title": "Today",
+        "id": "n3", "type": "tasks", "list_type": "today", "title": "Today",
         "paper": "#ddf3d1", "tape": "#c4e3b6", "pin": "tape",
-        "rotate": -1, "x": 40, "y": 250, "w": 240,
-        "tasks": [
-            {"text": "Morning run · 7am", "done": True},
-            {"text": "Review Q3 budget draft", "done": True},
-            {"text": "Team standup · 10:30am", "done": False},
-            {"text": "Pick up dry cleaning", "done": False},
-        ],
+        "rotate": -1, "x": 40, "y": 250, "w": 240, "tasks": [],
     },
     {
-        "id": "n4", "type": "tasks", "title": "Planned",
+        "id": "n4", "type": "tasks", "list_type": "planned", "title": "Planned",
         "paper": "#ebe0f9", "tape": "#d8caee", "pin": "pin",
-        "rotate": 2.5, "x": 290, "y": 250, "w": 230,
-        "tasks": [
-            {"text": "Dentist · Thu 2pm", "done": False},
-            {"text": "Denver trip · Oct 14-17", "done": False},
-            {"text": "Mom's birthday · Aug 9", "done": False},
-        ],
+        "rotate": 2.5, "x": 290, "y": 250, "w": 230, "tasks": [],
     },
     {
-        "id": "n5", "type": "tasks", "title": "Pending",
+        "id": "n5", "type": "tasks", "list_type": "pending", "title": "Pending",
         "paper": "#fce3c0", "tape": "#f2cf9d", "pin": "tape",
-        "rotate": -2.5, "x": 40, "y": 470, "w": 240,
-        "tasks": [
-            {"text": "Reply to landlord re: lease", "done": False},
-            {"text": "Approve invoice #2291", "done": False},
-            {"text": "Book flight for conference", "done": False},
-        ],
+        "rotate": -2.5, "x": 40, "y": 470, "w": 240, "tasks": [],
     },
     {
         "id": "n6", "type": "notes", "title": "Quick notes",
         "paper": "#fbd9ea", "tape": "#f0bdd8", "pin": "pin",
         "rotate": 1.5, "x": 290, "y": 470, "w": 230,
-        "content": (
-            "Ask HOPE to compare flight prices before Friday. "
-            "Try the new ramen place near 6th St."
-        ),
+        "content": "", "note_agent": "",
     },
 ]
 
