@@ -7,9 +7,14 @@ without real API keys, audio hardware, or network access.
 
 import hashlib
 import os
+import sys
+import tempfile
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+
+_REPO_ROOT = Path(__file__).parents[1]
 
 
 def pytest_configure(config):
@@ -44,6 +49,24 @@ def pytest_configure(config):
     }
     for key, value in defaults.items():
         os.environ[key] = value
+
+    # Paths that would otherwise resolve to Pavan's real data. Unlike the keys
+    # above these have defaults in Settings, so nothing fails without them —
+    # they'd just quietly read and write the live board DB and log file. Both
+    # are read at import time (dashboard/dashboard/state.py builds a module-level
+    # Board()), so this has to happen here, before collection, not in a fixture.
+    scratch = tempfile.mkdtemp(prefix="hope-tests-")
+    os.environ["BOARD_DB_PATH"] = str(Path(scratch) / "board.db")
+    os.environ["HOPE_LOG_PATH"] = str(Path(scratch) / "hope.log")
+
+    # The Reflex app is its own package rooted at dashboard/, outside the paths
+    # pytest adds for the repo itself. Without this, `import dashboard.state`
+    # picks up the outer dashboard/ directory as a namespace package and finds
+    # nothing. Mirrors what dashboard/dashboard/_pathfix.py does in reverse for
+    # the running app.
+    dashboard_root = str(_REPO_ROOT / "dashboard")
+    if dashboard_root not in sys.path:
+        sys.path.insert(0, dashboard_root)
 
 
 # ─── Fake environment ───────────────────────────────────────────

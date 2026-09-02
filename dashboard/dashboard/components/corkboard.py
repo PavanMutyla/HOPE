@@ -22,25 +22,52 @@ def _task_row(task: rx.Var[dict], idx: rx.Var[int]) -> rx.Component:
     return rx.el.div(
         rx.el.div(
             rx.cond(task["done"], "✓", ""),
+            on_click=DashboardState.toggle_task(task["id"]),
             style={
                 "width": "15px", "height": "15px", "borderRadius": "2px",
                 "border": f"1.5px solid {s.INK}",
                 "background": rx.cond(task["done"], "oklch(0.25 0.02 60 / 0.25)", "transparent"),
-                "flexShrink": 0, "marginTop": "3px", "opacity": 0.85,
+                "flexShrink": 0, "marginTop": "5px", "opacity": 0.85, "cursor": "pointer",
                 "display": "flex", "alignItems": "center", "justifyContent": "center",
                 "fontSize": "11px", "color": s.INK, "fontWeight": 700,
             },
         ),
-        rx.el.div(
-            f"{task['text']} ({_display_agent(task['agent'])})",
+        rx.debounce_input(
+            rx.el.input(
+                value=task["text"],
+                on_change=DashboardState.update_task_text(task["id"]),
+                style={
+                    "flex": 1, "background": "transparent", "border": "none", "outline": "none",
+                    "fontFamily": s.FONT_HAND, "fontSize": "19px", "color": s.INK, "lineHeight": 1.2,
+                    "opacity": rx.cond(task["done"], 0.55, 1),
+                    "textDecoration": rx.cond(task["done"], "line-through", "none"),
+                },
+            ),
+            debounce_timeout=500,
+        ),
+        rx.el.span(
+            _display_agent(task["agent"]),
+            style={"fontSize": "13px", "opacity": 0.5, "flexShrink": 0, "marginTop": "4px"},
+        ),
+        style={"display": "flex", "alignItems": "flex-start", "gap": "6px", "padding": "4px 0"},
+    )
+
+
+def _add_task_row(note: rx.Var[dict]) -> rx.Component:
+    return rx.debounce_input(
+        rx.el.input(
+            value=DashboardState.new_task_drafts.to(dict[str, str])[note["id"].to(str)],
+            on_change=DashboardState.set_new_task_draft(note["id"]),
+            on_key_down=DashboardState.on_new_task_key_down(note["id"], note["list_type"]),
+            placeholder="+ add...",
             style={
-                "fontSize": "19px", "lineHeight": 1.2,
-                "opacity": rx.cond(task["done"], 0.55, 1),
-                "textDecoration": rx.cond(task["done"], "line-through", "none"),
+                "width": "100%", "background": "transparent", "border": "none", "outline": "none",
+                "fontFamily": s.FONT_HAND, "fontSize": "19px", "color": s.INK, "opacity": 0.7,
+                "marginTop": "6px", "paddingTop": "4px", "borderTop": f"1px dashed {s.INK}",
             },
         ),
-        on_click=DashboardState.toggle_task(task["id"]),
-        style={"display": "flex", "alignItems": "flex-start", "gap": "8px", "padding": "4px 0", "cursor": "pointer"},
+        debounce_timeout=200,
+        force_notify_by_enter=True,
     )
 
 
@@ -72,7 +99,10 @@ def _note_body(note: rx.Var[dict]) -> rx.Component:
         ),
         rx.cond(
             note["type"] == "tasks",
-            rx.foreach(note["tasks"].to(list[dict]), _task_row),
+            rx.fragment(
+                rx.foreach(note["tasks"].to(list[dict]), _task_row),
+                _add_task_row(note),
+            ),
         ),
         rx.cond(
             note["type"] == "notes",

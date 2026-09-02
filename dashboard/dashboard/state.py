@@ -59,6 +59,10 @@ class DashboardState(rx.State):
     # merged in live from the shared board by load_board().
     notes: list[dict] = NOTE_LAYOUT
 
+    # Draft text for each task-list note's "add new item" input, keyed by
+    # note id (n3/n4/n5) — pre-populated so indexing never hits a missing key.
+    new_task_drafts: dict[str, str] = {"n3": "", "n4": "", "n5": ""}
+
     # Drag tracking (panel XOR one note at a time, matching the prototype)
     dragging_note_id: str = ""
     _note_drag_start: tuple[int, int] = (0, 0)
@@ -309,6 +313,29 @@ class DashboardState(rx.State):
     @rx.event
     async def toggle_task(self, item_id: int):
         await asyncio.to_thread(_board.toggle_item, item_id, settings.user_name)
+        await self.load_board()
+
+    @rx.event
+    async def update_task_text(self, item_id: int, value: str):
+        await asyncio.to_thread(_board.update_item_text, item_id, value, settings.user_name)
+        await self.load_board()
+
+    @rx.event
+    def set_new_task_draft(self, note_id: str, value: str):
+        self.new_task_drafts = {**self.new_task_drafts, note_id: value}
+
+    @rx.event
+    def on_new_task_key_down(self, note_id: str, list_type: str, key: str, info: dict):
+        if key == "Enter" and not info.get("shift_key"):
+            return DashboardState.add_task_ui(note_id, list_type)
+
+    @rx.event
+    async def add_task_ui(self, note_id: str, list_type: str):
+        text = self.new_task_drafts.get(note_id, "").strip()
+        if not text:
+            return
+        await asyncio.to_thread(_board.add_item, list_type, text, settings.user_name)
+        self.new_task_drafts = {**self.new_task_drafts, note_id: ""}
         await self.load_board()
 
     @rx.event
