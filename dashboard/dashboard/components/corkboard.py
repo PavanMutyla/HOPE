@@ -20,24 +20,33 @@ def _display_agent(agent: rx.Var[str]) -> rx.Var[str]:
 
 def _task_row(task: rx.Var[dict], idx: rx.Var[int]) -> rx.Component:
     return rx.el.div(
-        rx.el.div(
+        rx.el.button(
             rx.cond(task["done"], "✓", ""),
             on_click=DashboardState.toggle_task(task["id"]),
+            role="checkbox",
+            aria_checked=rx.cond(task["done"], "true", "false"),
+            aria_label=task["text"],
             style={
-                "width": "15px", "height": "15px", "borderRadius": "2px",
+                "width": "16px", "height": "16px", "borderRadius": "2px",
                 "border": f"1.5px solid {s.INK}",
                 "background": rx.cond(task["done"], "oklch(0.25 0.02 60 / 0.25)", "transparent"),
                 "flexShrink": 0, "marginTop": "5px", "opacity": 0.85, "cursor": "pointer",
                 "display": "flex", "alignItems": "center", "justifyContent": "center",
-                "fontSize": "11px", "color": s.INK, "fontWeight": 700,
+                "fontSize": "11px", "color": s.INK, "fontWeight": 700, "padding": 0,
+                # Ink, not the cyan accent: on paper the accent is invisible.
+                "_focusVisible": {"outline": f"2px solid {s.INK}", "outlineOffset": "2px"},
             },
         ),
         rx.debounce_input(
             rx.el.input(
                 value=task["text"],
                 on_change=DashboardState.update_task_text(task["id"]),
+                aria_label="Task text",
                 style={
-                    "flex": 1, "background": "transparent", "border": "none", "outline": "none",
+                    "flex": 1, "background": "transparent", "border": "none",
+                    "_focusVisible": {
+                        "outline": f"2px solid {s.INK}", "outlineOffset": "1px",
+                    },
                     "fontFamily": s.FONT_HAND, "fontSize": "19px", "color": s.INK, "lineHeight": 1.2,
                     "opacity": rx.cond(task["done"], 0.55, 1),
                     "textDecoration": rx.cond(task["done"], "line-through", "none"),
@@ -59,9 +68,11 @@ def _add_task_row(note: rx.Var[dict]) -> rx.Component:
             value=DashboardState.new_task_drafts.to(dict[str, str])[note["id"].to(str)],
             on_change=DashboardState.set_new_task_draft(note["id"]),
             on_key_down=DashboardState.on_new_task_key_down(note["id"], note["list_type"]),
-            placeholder="+ add...",
+            placeholder="Add an item…",
+            aria_label=note["title"].to(str) + ": add an item",
             style={
-                "width": "100%", "background": "transparent", "border": "none", "outline": "none",
+                "width": "100%", "background": "transparent", "border": "none",
+                "_focusVisible": {"outline": f"2px solid {s.INK}", "outlineOffset": "1px"},
                 "fontFamily": s.FONT_HAND, "fontSize": "19px", "color": s.INK, "opacity": 0.7,
                 "marginTop": "6px", "paddingTop": "4px", "borderTop": f"1px dashed {s.INK}",
             },
@@ -111,7 +122,7 @@ def _note_body(note: rx.Var[dict]) -> rx.Component:
                     rx.el.textarea(
                         value=note["content"],
                         on_change=DashboardState.edit_note_content,
-                        placeholder="jot something down...",
+                        placeholder="Jot something down…",
                         style={
                             "width": "100%", "minHeight": "90px", "background": "transparent",
                             "border": "none", "outline": "none", "resize": "vertical",

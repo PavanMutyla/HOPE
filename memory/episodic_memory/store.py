@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from memory.episodic_memory import episodic, plans
-from memory.episodic_memory.schema import Episode, Plan
+from memory.episodic_memory.schema import Episode, EpisodeMessage, Plan, Session
 from memory.episodic_memory.vector_store import EpisodicVectorStore
 from settings import settings
 
@@ -69,6 +69,31 @@ class EpisodicMemory:
     def get_latest_by_reason(self, reason: str, agent: str | None = None) -> Episode | None:
         episode_id = episodic.get_latest_episode_by_reason(self._conn, reason, agent)
         return episodic.get_episode(self._conn, episode_id) if episode_id else None
+
+    def list_sessions(self, agent: str | None = None) -> list[Session]:
+        """Every past conversation, newest first. Backs the dashboard's thread
+        list — see schema.Session for why this is computed, not stored."""
+        return episodic.list_sessions(self._conn, agent)
+
+    def get_session_transcript(
+        self, session_id: str, agent: str | None = None
+    ) -> list[EpisodeMessage]:
+        """Every message of one conversation, in order, flattened across the
+        episodes it was folded into.
+
+        A long session folds several times, so its turns are spread over
+        several episodes — the reader wants one continuous transcript, not the
+        fold boundaries, which are an implementation detail of summarization.
+        `seq` only orders within an episode, so episodes are walked in ts order
+        and each one's messages appended in seq order.
+        """
+        episode_ids = episodic.get_episode_ids_by_session(self._conn, session_id, agent)
+        transcript: list[EpisodeMessage] = []
+        for episode_id in episode_ids:
+            episode = episodic.get_episode(self._conn, episode_id)
+            if episode is not None:
+                transcript.extend(episode.messages)
+        return transcript
 
     def upgrade(self, episode_id: str, agent: str, summary: str, reason: str = "session_end") -> None:
         """Replace a raw flush()-archived episode's summary with a real one,

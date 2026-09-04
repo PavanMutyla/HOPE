@@ -70,6 +70,25 @@ def _stop_dashboard(proc: subprocess.Popen | None) -> None:
             pass
 
 
+_LIVE_HEARTBEAT_SECONDS = 10
+
+
+async def _live_heartbeat(live_feed) -> None:
+    """Tell the dashboard this process is still alive.
+
+    Without it, the dashboard can only see the last state change, and a HOPE
+    sitting silently in `listening` is indistinguishable from a HOPE that was
+    killed while listening. Best-effort: a failure here is a stale dashboard,
+    never a stalled pipeline.
+    """
+    while True:
+        await asyncio.sleep(_LIVE_HEARTBEAT_SECONDS)
+        try:
+            await asyncio.to_thread(live_feed.heartbeat)
+        except Exception:
+            logger.exception("Live heartbeat failed — dashboard may show HOPE as down")
+
+
 async def main():
     # This terminal is reserved for the dashboard subprocess's own output
     # (see _start_dashboard) — HOPE's own logs go only to hope_log_path,
@@ -96,6 +115,8 @@ async def main():
         setup_tools(orchestrator)
 
         await inject_warm_start(bundle.episodic_memory, bundle.context)
+
+        asyncio.create_task(_live_heartbeat(bundle.live_feed))
 
         asyncio.create_task(
             upgrade_pending_episodes(
@@ -124,6 +145,11 @@ async def main():
             bundle.episodic_memory.close()
             bundle.blackboard.close()
             bundle.board.close()
+            # Flag the pipeline down before closing, so the dashboard renders
+            # "not running" instead of a frozen live panel. Turns are left in
+            # place — the next run clears them.
+            bundle.live_feed.end_session()
+            bundle.live_feed.close()
             atlas_team_member.voice.close()
     finally:
         _stop_dashboard(dashboard_proc)

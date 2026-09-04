@@ -1,226 +1,340 @@
-"""Dashboard state. The chat panel is still Phase 1 (mock data, no backend),
-ported from the Component class in the Claude Design prototype's `HOPE
-Dashboard.dc.html`. The corkboard notes are real: Today/Planned/Pending/Quick
-notes and Location/Weather are backed by the shared board (memory/board/) —
-the same tools HOPE and Atlas call by voice.
+"""Dashboard state.
+
+Two sources feed this, both SQLite over WAL, because the dashboard is a
+separate OS process from hope.py and cannot see the pipeline's in-memory state:
+
+- the **shared board** (memory/board/) backs the corkboard notes, the same rows
+  HOPE and Atlas edit by voice;
+- **episodic memory** (past conversations) and the **live feed**
+  (memory/live/, written by the running pipeline) back the console.
+
+There is no text input anywhere. HOPE takes voice only, so the console reads
+rather than writes: it shows the conversation happening now, or one that
+already happened.
 """
 
 import dashboard._pathfix  # noqa: F401 — sys.path side effect, must run first
 
 import asyncio
-import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 import reflex as rx
 
-from dashboard.data import AGENT_META, INITIAL_CHATS, MOCK_ATTACHMENT_NAMES, NOTE_LAYOUT
+from dashboard.data import NOTE_LAYOUT
 from memory.board import live as board_live
 from memory.board.store import Board
+from memory.episodic_memory.store import EpisodicMemory
+from memory.live.store import LiveFeed
 from settings import settings
 
-REGENERATE_TEXT = "Here's another take on that — regenerated response for the prototype."
-MOCK_REPLY_TEXT = "Noted — I'll factor that in. (This is a mocked response for the prototype.)"
-
 _board = Board()
-_REFRESH_SECONDS = 15
+_episodic = EpisodicMemory()
+_live = LiveFeed()
+
+_BOARD_REFRESH_SECONDS = 15
 _LOG_REFRESH_SECONDS = 3
+_LIVE_REFRESH_SECONDS = 1  # the live console is the one thing that should feel immediate
+_SESSION_REFRESH_SECONDS = 30
+# How long the live row may go untouched before the writer is presumed
+# gone. hope.py heartbeats every 10s, so 30s is three missed beats; short
+# enough that a crashed pipeline stops claiming to be live almost at once,
+# long enough to ride out a slow fold or a GC pause.
+_LIVE_STALE_SECONDS = 30
 _LOG_TAIL_LINES = 200
+
+# The marker ContextSummarizer.flush() writes for a session archived raw at
+# shutdown and not yet re-summarized. Showing it verbatim leaks an internal
+# detail into the thread list, so it gets replaced with plain language.
+_UNSUMMARIZED = "[NOT SUMMARIZED YET"
+
+# Warm-start injection and the greeting prompt are written as `developer`
+# messages. They are scaffolding the pipeline sends itself, not things anyone
+# said, so the transcript hides them.
+_VISIBLE_ROLES = ("user", "assistant")
+
+LIVE_THREAD_ID = "__live__"
+
+
+def _relative_time(iso_ts: str) -> str:
+    """'4m', '2h', '3d'. Absolute dates are shown alongside, so this only has
+    to convey recency at a glance."""
+    if not iso_ts:
+        return ""
+    try:
+        then = datetime.fromisoformat(iso_ts)
+    except ValueError:
+        return ""
+    if then.tzinfo is None:
+        then = then.replace(tzinfo=timezone.utc)
+    seconds = (datetime.now(timezone.utc) - then).total_seconds()
+    if seconds < 60:
+        return "just now"
+    if seconds < 3600:
+        return f"{int(seconds // 60)}m"
+    if seconds < 86400:
+        return f"{int(seconds // 3600)}h"
+    return f"{int(seconds // 86400)}d"
+
+
+def _is_stale(iso_ts: str) -> bool:
+    """True when the live row has not been heartbeated recently enough to
+    believe. An unparseable or empty timestamp counts as stale: it means
+    nothing has ever written the row."""
+    if not iso_ts:
+        return True
+    try:
+        then = datetime.fromisoformat(iso_ts)
+    except ValueError:
+        return True
+    if then.tzinfo is None:
+        then = then.replace(tzinfo=timezone.utc)
+    return (datetime.now(timezone.utc) - then).total_seconds() > _LIVE_STALE_SECONDS
+
+
+def _day_label(iso_ts: str) -> str:
+    if not iso_ts:
+        return ""
+    try:
+        then = datetime.fromisoformat(iso_ts)
+    except ValueError:
+        return ""
+    return then.strftime("%-d %b, %-I:%M %p")
+
+
+def _headline(summary: str) -> str:
+    """First sentence of the session summary, used as the thread's name.
+
+    Sessions have no titles; the summary is the only human-written description
+    of what happened, and its opening sentence is reliably the topic.
+    """
+    if not summary or summary.startswith(_UNSUMMARIZED):
+        return "Not summarized yet"
+    first = summary.strip().split(". ")[0].strip().rstrip(".")
+    return first if len(first) <= 70 else first[:67].rstrip() + "…"
 
 
 class DashboardState(rx.State):
-    # Sidebar
+    # ── chrome ──────────────────────────────────────────────────
     sidebar_collapsed: bool = False
+    console_open: bool = True
+    console_x: int = 800
+    console_y: int = 40
 
-    # Chat panel chrome — positioned clear of the corkboard notes (which
-    # occupy roughly screen-x 300-780 with the sidebar expanded), not on
-    # top of them.
-    panel_open: bool = True
-    panel_x: int = 820
-    panel_y: int = 40
-    model: str = "HOPE"
-    model_menu_open: bool = False
-    attach_menu_open: bool = False
-    listening: bool = False
+    # Which conversation the console is showing. LIVE_THREAD_ID means "now".
+    selected_thread: str = LIVE_THREAD_ID
 
-    # Chats + active thread
-    chats: list[dict] = INITIAL_CHATS
-    active_chat_id: str = "c1"
+    # ── live feed ───────────────────────────────────────────────
+    live_state: str = "idle"
+    live_agent: str = ""
+    live_context_pct: float = 0.0
+    live_session_id: str = ""
+    live_turns: list[dict] = []
 
-    # Composer
-    compose_text: str = ""
-    attachments: list[dict] = []
-    is_thinking: bool = False
+    # ── history ─────────────────────────────────────────────────
+    sessions: list[dict] = []
+    transcript: list[dict] = []
+    transcript_loading: bool = False
 
-    # Message editing
-    editing_msg_id: str = ""
-    edit_drafts: dict[str, str] = {}
-
-    # Corkboard notes — layout (position/paper/etc.) is static; content is
-    # merged in live from the shared board by load_board().
+    # ── corkboard ───────────────────────────────────────────────
     notes: list[dict] = NOTE_LAYOUT
-
-    # Draft text for each task-list note's "add new item" input, keyed by
-    # note id (n3/n4/n5) — pre-populated so indexing never hits a missing key.
     new_task_drafts: dict[str, str] = {"n3": "", "n4": "", "n5": ""}
 
-    # Drag tracking (panel XOR one note at a time, matching the prototype)
-    dragging_note_id: str = ""
-    _note_drag_start: tuple[int, int] = (0, 0)
-    _note_drag_orig: tuple[int, int] = (0, 0)
-    dragging_panel: bool = False
-    _panel_drag_start: tuple[int, int] = (0, 0)
-    _panel_drag_orig: tuple[int, int] = (0, 0)
-
-    # Terminal (HOPE log tail) panel — under the notes column, clear of both
-    # the notes and the chat panel (which sits to the right, see panel_x).
+    # ── terminal ────────────────────────────────────────────────
     terminal_open: bool = True
     terminal_x: int = 300
     terminal_y: int = 670
     terminal_lines: list[str] = []
+
+    # ── drag tracking (one thing at a time) ─────────────────────
+    dragging_note_id: str = ""
+    _note_drag_start: tuple[int, int] = (0, 0)
+    _note_drag_orig: tuple[int, int] = (0, 0)
+    dragging_console: bool = False
+    _console_drag_start: tuple[int, int] = (0, 0)
+    _console_drag_orig: tuple[int, int] = (0, 0)
     dragging_terminal: bool = False
     _terminal_drag_start: tuple[int, int] = (0, 0)
     _terminal_drag_orig: tuple[int, int] = (0, 0)
 
-    # ---- computed ----
+    # ── computed ────────────────────────────────────────────────
 
     @rx.var
-    def active_chat(self) -> dict:
-        for chat in self.chats:
-            if chat["id"] == self.active_chat_id:
-                return chat
-        return self.chats[0] if self.chats else {"id": "", "messages": []}
+    def is_dragging(self) -> bool:
+        """Text selection fights a pointer drag: without this, dragging a note
+        paints a selection across the whole board. Scoped to the drag so text
+        stays selectable the rest of the time."""
+        return bool(self.dragging_note_id) or self.dragging_console or self.dragging_terminal
 
     @rx.var
-    def display_messages(self) -> list[dict]:
-        out = []
-        for m in self.active_chat["messages"]:
-            if m["role"] == "user":
-                is_editing = self.editing_msg_id == m["id"]
-                out.append({
-                    **m,
-                    "is_user": True,
-                    "is_editing": is_editing,
-                    "edit_value": self.edit_drafts.get(m["id"], m["text"]),
-                })
-                continue
-            versions = m.get("versions") or [m.get("text", "")]
-            av = m.get("active_version", 0)
-            meta = AGENT_META.get(m.get("agent", "HOPE"), AGENT_META["HOPE"])
-            out.append({
-                **m,
-                "is_user": False,
-                "avatar_color": meta["color"],
-                "avatar_initial": meta["initial"],
-                "agent_name": m.get("agent", "HOPE"),
-                "text": versions[av],
-                "has_versions": len(versions) > 1,
-                "version_label": f"{av + 1}/{len(versions)}",
-            })
-        return out
+    def is_live_selected(self) -> bool:
+        return self.selected_thread == LIVE_THREAD_ID
 
     @rx.var
-    def chat_list(self) -> list[dict]:
-        out = []
-        for c in self.chats:
-            first = c["messages"][0]["text"] if c["messages"] else "no messages yet"
-            out.append({
-                "id": c["id"],
-                "title": c["title"],
-                "time": c["time"],
-                "dot": c["dot"],
-                "initial": c["title"][:1].upper(),
-                "preview": first[:30],
-                "active": c["id"] == self.active_chat_id,
-            })
-        return out
+    def hope_is_running(self) -> bool:
+        return self.live_state != "idle"
 
-    # ---- sidebar / chrome ----
+    @rx.var
+    def live_status_label(self) -> str:
+        """Plain words, not jargon. 'idle' is the one that needs explaining:
+        it means the process isn't up, which is not obvious from the word."""
+        return {
+            "listening": "Listening",
+            "thinking": "Thinking",
+            "speaking": "Speaking",
+        }.get(self.live_state, "Not running")
+
+    @rx.var
+    def context_label(self) -> str:
+        return f"{self.live_context_pct:.0%} context used"
+
+    @rx.var
+    def thread_rows(self) -> list[dict]:
+        return [
+            {
+                **session,
+                "active": session["id"] == self.selected_thread,
+            }
+            for session in self.sessions
+        ]
+
+    @rx.var
+    def console_title(self) -> str:
+        if self.is_live_selected:
+            return "Now"
+        for session in self.sessions:
+            if session["id"] == self.selected_thread:
+                return session["when"]
+        return "Conversation"
+
+    @rx.var
+    def console_messages(self) -> list[dict]:
+        """One shape for both modes, so the message list renders from a single
+        component whether it is showing live turns or a stored transcript."""
+        if self.is_live_selected:
+            return [
+                {
+                    "key": f"live-{turn['seq']}",
+                    "is_user": turn["role"] == "user",
+                    "speaker": "You" if turn["role"] == "user" else (turn["agent"] or "HOPE").upper(),
+                    "text": turn["text"],
+                }
+                for turn in self.live_turns
+            ]
+        return [
+            {
+                "key": f"past-{i}",
+                "is_user": message["role"] == "user",
+                "speaker": "You" if message["role"] == "user" else message["agent"].upper(),
+                "text": message["text"],
+            }
+            for i, message in enumerate(self.transcript)
+        ]
+
+    @rx.var
+    def console_is_empty(self) -> bool:
+        return len(self.console_messages) == 0
+
+    @rx.var
+    def empty_message(self) -> str:
+        """Empty states say what to do, not just that there is nothing here."""
+        if not self.is_live_selected:
+            return "This conversation has no recorded turns."
+        if self.hope_is_running:
+            return "HOPE is listening. Start talking and the conversation appears here."
+        return "HOPE is not running. Start it with hope.py to talk."
+
+    # ── chrome events ───────────────────────────────────────────
 
     @rx.event
     def toggle_sidebar(self):
         self.sidebar_collapsed = not self.sidebar_collapsed
 
     @rx.event
-    def toggle_model_menu(self):
-        self.model_menu_open = not self.model_menu_open
+    def close_console(self):
+        self.console_open = False
 
     @rx.event
-    def select_model(self, name: str):
-        self.model = name
-        self.model_menu_open = False
+    def open_console(self):
+        self.console_open = True
+
+    # ── thread selection ────────────────────────────────────────
 
     @rx.event
-    def toggle_attach_menu(self):
-        self.attach_menu_open = not self.attach_menu_open
+    async def select_live(self):
+        self.selected_thread = LIVE_THREAD_ID
+        self.console_open = True
+        await self.load_live()
 
     @rx.event
-    def toggle_voice(self):
-        self.listening = not self.listening
-
-    @rx.event
-    def close_panel(self):
-        self.panel_open = False
-
-    # ---- chats ----
-
-    def _update_chat(self, chat_id: str, fn):
-        self.chats = [fn(c) if c["id"] == chat_id else c for c in self.chats]
-
-    @rx.event
-    def new_chat(self):
-        new_id = f"c{int(time.time() * 1000)}"
-        chat = {
-            "id": new_id, "title": "New conversation", "time": "now",
-            "dot": "oklch(0.78 0.14 200)", "messages": [],
-        }
-        self.chats = [chat, *self.chats]
-        self.active_chat_id = new_id
-        self.panel_open = True
-
-    @rx.event
-    def select_chat(self, chat_id: str):
-        self.active_chat_id = chat_id
-        self.panel_open = True
-
-    # ---- composer ----
-
-    @rx.event
-    def set_compose_text(self, value: str):
-        self.compose_text = value
-
-    @rx.event
-    def on_compose_key_down(self, key: str, info: dict):
-        if key == "Enter" and not info.get("shift_key"):
-            return DashboardState.send_message
-
-    @rx.event
-    async def send_message(self):
-        text = self.compose_text.strip()
-        if not text:
-            return
-        chat_id = self.active_chat_id
-        user_msg = {"id": f"m{int(time.time() * 1000)}", "role": "user", "text": text}
-        self._update_chat(chat_id, lambda c: {**c, "messages": [*c["messages"], user_msg]})
-        self.compose_text = ""
-        self.is_thinking = True
-        self.attachments = []
+    async def select_thread(self, session_id: str):
+        self.selected_thread = session_id
+        self.console_open = True
+        self.transcript_loading = True
         yield
-        await asyncio.sleep(0.7)
-        reply = {
-            "id": f"m{int(time.time() * 1000) + 1}", "role": "assistant",
-            "agent": self.model, "active_version": 0, "versions": [MOCK_REPLY_TEXT],
-        }
-        self._update_chat(chat_id, lambda c: {**c, "messages": [*c["messages"], reply]})
-        self.is_thinking = False
+        await self.load_transcript(session_id)
+        self.transcript_loading = False
 
-    # ---- shared board (real, DB-backed) ----
+    @rx.event
+    async def load_transcript(self, session_id: str):
+        messages = await asyncio.to_thread(_episodic.get_session_transcript, session_id)
+        agent = next(
+            (s["agent"] for s in self.sessions if s["id"] == session_id), "hope"
+        )
+        self.transcript = [
+            {"role": m.role, "text": m.content_text or "", "agent": agent}
+            for m in messages
+            if m.role in _VISIBLE_ROLES and (m.content_text or "").strip()
+        ]
+
+    # ── data loading ────────────────────────────────────────────
+
+    @rx.event
+    async def load_sessions(self):
+        sessions = await asyncio.to_thread(_episodic.list_sessions)
+        # The run currently in progress is shown as Live, not as history; it
+        # would otherwise appear twice and read as a duplicate.
+        current = self.live_session_id
+        self.sessions = [
+            {
+                "id": s.session_id,
+                "agent": s.agent,
+                "headline": _headline(s.summary),
+                "when": _day_label(s.ended_at),
+                "ago": _relative_time(s.ended_at),
+                "count": s.message_count,
+                "count_label": f"{s.message_count} messages",
+            }
+            for s in sessions
+            if s.session_id != current
+        ]
+
+    @rx.event
+    async def load_live(self):
+        status = await asyncio.to_thread(_live.get_status)
+        # A row that stopped being touched means the process behind it died
+        # without running end_session(). Believing state alone would leave a
+        # green "live" indicator up for a HOPE that is not running.
+        self.live_state = (
+            "idle" if _is_stale(status.updated_at) else status.state
+        )
+        self.live_agent = status.agent
+        self.live_context_pct = status.context_pct
+        self.live_session_id = status.session_id
+        if status.session_id:
+            turns = await asyncio.to_thread(_live.get_turns, status.session_id, 60)
+            self.live_turns = [
+                {"seq": t.seq, "role": t.role, "agent": t.agent, "text": t.text}
+                for t in turns
+            ]
+        else:
+            self.live_turns = []
 
     @rx.event
     async def load_board(self):
-        """Fetch current board state and merge it into `self.notes`, leaving
-        each note's layout (x/y/rotate/paper/tape/pin/title) untouched — only
-        overwrites the content fields, so a dragged position survives a
-        refresh."""
+        """Fetch board state and merge it into `self.notes`, leaving each
+        note's layout (x/y/rotate/paper/tape/pin/title) untouched so a dragged
+        position survives a refresh."""
         today = await asyncio.to_thread(_board.list_items, "today")
         planned = await asyncio.to_thread(_board.list_items, "planned")
         pending = await asyncio.to_thread(_board.list_items, "pending")
@@ -255,12 +369,11 @@ class DashboardState(rx.State):
                     "wind": f"{weather['wind_kmh']} km/h",
                 }
             if n["type"] == "tasks":
-                items = tasks_by_list[n["list_type"]]
                 return {
                     **n,
                     "tasks": [
                         {"id": i.id, "text": i.text, "done": i.done, "agent": i.agent}
-                        for i in items
+                        for i in tasks_by_list[n["list_type"]]
                     ],
                 }
             if n["type"] == "notes":
@@ -270,28 +383,40 @@ class DashboardState(rx.State):
         self.notes = [merge(n) for n in self.notes]
 
     @rx.event
-    async def on_page_load(self):
-        await self.load_board()
-        await self.load_terminal()
-        return [DashboardState.refresh_loop, DashboardState.log_refresh_loop]
-
-    @rx.event(background=True)
-    async def refresh_loop(self):
-        while True:
-            await asyncio.sleep(_REFRESH_SECONDS)
-            async with self:
-                await self.load_board()
-
-    # ---- terminal (HOPE log tail) ----
-
-    @rx.event
     async def load_terminal(self):
         path = Path(settings.hope_log_path)
         if not path.exists():
-            self.terminal_lines = ["No logs yet — start hope.py to see live activity here."]
+            self.terminal_lines = ["No log yet. Start hope.py to see activity here."]
             return
-        lines = await asyncio.to_thread(path.read_text)
-        self.terminal_lines = lines.splitlines()[-_LOG_TAIL_LINES:]
+        text = await asyncio.to_thread(path.read_text)
+        self.terminal_lines = text.splitlines()[-_LOG_TAIL_LINES:]
+
+    @rx.event
+    async def on_page_load(self):
+        await self.load_live()
+        await self.load_sessions()
+        await self.load_board()
+        await self.load_terminal()
+        return [
+            DashboardState.live_refresh_loop,
+            DashboardState.board_refresh_loop,
+            DashboardState.log_refresh_loop,
+            DashboardState.session_refresh_loop,
+        ]
+
+    @rx.event(background=True)
+    async def live_refresh_loop(self):
+        while True:
+            await asyncio.sleep(_LIVE_REFRESH_SECONDS)
+            async with self:
+                await self.load_live()
+
+    @rx.event(background=True)
+    async def board_refresh_loop(self):
+        while True:
+            await asyncio.sleep(_BOARD_REFRESH_SECONDS)
+            async with self:
+                await self.load_board()
 
     @rx.event(background=True)
     async def log_refresh_loop(self):
@@ -300,15 +425,15 @@ class DashboardState(rx.State):
             async with self:
                 await self.load_terminal()
 
-    @rx.event
-    def close_terminal(self):
-        self.terminal_open = False
+    @rx.event(background=True)
+    async def session_refresh_loop(self):
+        """Slower than the rest: a new thread only appears when a run ends."""
+        while True:
+            await asyncio.sleep(_SESSION_REFRESH_SECONDS)
+            async with self:
+                await self.load_sessions()
 
-    @rx.event
-    def start_terminal_drag(self, info: dict):
-        self.dragging_terminal = True
-        self._terminal_drag_start = (info["client_x"], info["client_y"])
-        self._terminal_drag_orig = (self.terminal_x, self.terminal_y)
+    # ── board editing ───────────────────────────────────────────
 
     @rx.event
     async def toggle_task(self, item_id: int):
@@ -343,83 +468,17 @@ class DashboardState(rx.State):
         await asyncio.to_thread(_board.update_quick_note, value, settings.user_name)
         await self.load_board()
 
-    # ---- message actions ----
+    # ── terminal ────────────────────────────────────────────────
 
     @rx.event
-    def regenerate(self, chat_id: str, msg_id: str):
-        def add_version(c):
-            messages = []
-            for m in c["messages"]:
-                if m["id"] == msg_id:
-                    versions = [*m["versions"], REGENERATE_TEXT]
-                    m = {**m, "versions": versions, "active_version": len(versions) - 1}
-                messages.append(m)
-            return {**c, "messages": messages}
-
-        self._update_chat(chat_id, add_version)
+    def close_terminal(self):
+        self.terminal_open = False
 
     @rx.event
-    def switch_version(self, chat_id: str, msg_id: str, direction: int):
-        def shift(c):
-            messages = []
-            for m in c["messages"]:
-                if m["id"] == msg_id:
-                    n = len(m["versions"])
-                    new_av = max(0, min(n - 1, m["active_version"] + direction))
-                    m = {**m, "active_version": new_av}
-                messages.append(m)
-            return {**c, "messages": messages}
+    def open_terminal(self):
+        self.terminal_open = True
 
-        self._update_chat(chat_id, shift)
-
-    @rx.event
-    def start_edit(self, msg_id: str, text: str):
-        self.editing_msg_id = msg_id
-        self.edit_drafts = {**self.edit_drafts, msg_id: text}
-
-    @rx.event
-    def edit_change(self, msg_id: str, value: str):
-        self.edit_drafts = {**self.edit_drafts, msg_id: value}
-
-    @rx.event
-    def cancel_edit(self):
-        self.editing_msg_id = ""
-
-    @rx.event
-    def save_edit(self, chat_id: str, msg_id: str):
-        draft = self.edit_drafts.get(msg_id, "")
-
-        def apply(c):
-            return {
-                **c,
-                "messages": [
-                    {**m, "text": draft} if m["id"] == msg_id else m
-                    for m in c["messages"]
-                ],
-            }
-
-        self._update_chat(chat_id, apply)
-        self.editing_msg_id = ""
-
-    @rx.event
-    def copy_text(self, text: str):
-        return rx.set_clipboard(text)
-
-    # ---- attachments ----
-
-    @rx.event
-    def add_attachment(self, type_: str):
-        self.attachments = [
-            *self.attachments,
-            {"id": f"a{int(time.time() * 1000)}", "type": type_, "name": MOCK_ATTACHMENT_NAMES[type_]},
-        ]
-        self.attach_menu_open = False
-
-    @rx.event
-    def remove_attachment(self, att_id: str):
-        self.attachments = [a for a in self.attachments if a["id"] != att_id]
-
-    # ---- note drag ----
+    # ── dragging ────────────────────────────────────────────────
 
     @rx.event
     def start_note_drag(self, note_id: str, info: dict):
@@ -429,27 +488,32 @@ class DashboardState(rx.State):
         self._note_drag_orig = (note["x"], note["y"])
 
     @rx.event
-    def start_panel_drag(self, info: dict):
-        self.dragging_panel = True
-        self._panel_drag_start = (info["client_x"], info["client_y"])
-        self._panel_drag_orig = (self.panel_x, self.panel_y)
+    def start_console_drag(self, info: dict):
+        self.dragging_console = True
+        self._console_drag_start = (info["client_x"], info["client_y"])
+        self._console_drag_orig = (self.console_x, self.console_y)
+
+    @rx.event
+    def start_terminal_drag(self, info: dict):
+        self.dragging_terminal = True
+        self._terminal_drag_start = (info["client_x"], info["client_y"])
+        self._terminal_drag_orig = (self.terminal_x, self.terminal_y)
 
     @rx.event(throttle=16)
     def on_root_mouse_move(self, info: dict):
         if self.dragging_note_id:
             sx, sy = self._note_drag_start
             ox, oy = self._note_drag_orig
-            nx = ox + (info["client_x"] - sx)
-            ny = oy + (info["client_y"] - sy)
+            nx, ny = ox + (info["client_x"] - sx), oy + (info["client_y"] - sy)
             note_id = self.dragging_note_id
             self.notes = [
                 {**n, "x": nx, "y": ny} if n["id"] == note_id else n for n in self.notes
             ]
-        elif self.dragging_panel:
-            sx, sy = self._panel_drag_start
-            ox, oy = self._panel_drag_orig
-            self.panel_x = ox + (info["client_x"] - sx)
-            self.panel_y = oy + (info["client_y"] - sy)
+        elif self.dragging_console:
+            sx, sy = self._console_drag_start
+            ox, oy = self._console_drag_orig
+            self.console_x = ox + (info["client_x"] - sx)
+            self.console_y = oy + (info["client_y"] - sy)
         elif self.dragging_terminal:
             sx, sy = self._terminal_drag_start
             ox, oy = self._terminal_drag_orig
@@ -459,5 +523,5 @@ class DashboardState(rx.State):
     @rx.event
     def on_root_mouse_up(self, info: dict):
         self.dragging_note_id = ""
-        self.dragging_panel = False
+        self.dragging_console = False
         self.dragging_terminal = False

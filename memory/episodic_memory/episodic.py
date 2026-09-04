@@ -22,7 +22,7 @@ from pathlib import Path
 from ulid import ULID
 
 from memory.episodic_memory.media import store_bytes
-from memory.episodic_memory.schema import Episode, EpisodeMediaPart, EpisodeMessage
+from memory.episodic_memory.schema import Episode, EpisodeMediaPart, EpisodeMessage, Session
 
 _DATA_URI_RE = re.compile(r"^data:(?P<mime>[^;,]+);base64,(?P<data>.+)$", re.DOTALL)
 
@@ -255,3 +255,74 @@ def get_episode(conn: sqlite3.Connection, episode_id: str) -> Episode | None:
         summary=episode_row["summary"],
         messages=messages,
     )
+
+
+def list_sessions(conn: sqlite3.Connection, agent: str | None = None) -> list[Session]:
+    """Every conversation, newest first — the dashboard's thread list.
+
+    Grouped by session_id rather than read from a table, because there is no
+    sessions table (see schema.Session). `summary` is taken from the session's
+    *latest* episode: a long conversation folds several times, and the last
+    fold — or the session_end summary that supersedes it — is the one that
+    describes where the conversation ended up.
+
+    A session is split per agent when both HOPE and Atlas wrote under the same
+    id, which today can't happen (Atlas mints its own id per task) but would
+    quietly merge two agents' turns into one thread if it ever did.
+    """
+    query = """
+        SELECT
+            e.session_id                              AS session_id,
+            e.agent                                   AS agent,
+            MIN(e.ts)                                 AS started_at,
+            MAX(e.ts)                                 AS ended_at,
+            COUNT(DISTINCT e.id)                      AS episode_count,
+            (SELECT COUNT(*) FROM episode_messages m
+              JOIN episodes e2 ON e2.id = m.episode_id
+             WHERE e2.session_id = e.session_id
+               AND e2.agent = e.agent)                AS message_count,
+            (SELECT e3.summary FROM episodes e3
+             WHERE e3.session_id = e.session_id
+               AND e3.agent = e.agent
+             ORDER BY e3.ts DESC LIMIT 1)             AS summary
+        FROM episodes e
+        {where}
+        GROUP BY e.session_id, e.agent
+        ORDER BY MAX(e.ts) DESC
+    """
+    if agent is not None:
+        rows = conn.execute(
+            query.format(where="WHERE e.agent = ?"), (agent,)
+        ).fetchall()
+    else:
+        rows = conn.execute(query.format(where="")).fetchall()
+
+    return [
+        Session(
+            session_id=row["session_id"],
+            agent=row["agent"],
+            started_at=row["started_at"],
+            ended_at=row["ended_at"],
+            episode_count=row["episode_count"],
+            message_count=row["message_count"],
+            summary=row["summary"] or "",
+        )
+        for row in rows
+    ]
+
+
+def get_episode_ids_by_session(
+    conn: sqlite3.Connection, session_id: str, agent: str | None = None
+) -> list[str]:
+    """Ids only, oldest first — same ids-only convention as
+    list_episodes_by_reason(); hydrate each through get_episode()."""
+    if agent is not None:
+        rows = conn.execute(
+            "SELECT id FROM episodes WHERE session_id = ? AND agent = ? ORDER BY ts",
+            (session_id, agent),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT id FROM episodes WHERE session_id = ? ORDER BY ts", (session_id,)
+        ).fetchall()
+    return [row["id"] for row in rows]

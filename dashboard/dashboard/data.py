@@ -1,23 +1,14 @@
-"""Mock fixtures for the HOPE dashboard — ported 1:1 from the Claude Design
-prototype's initial `state` (Claude Design project 88211171-b981-4b80-8275-
-c7f8e8a58320, `HOPE Dashboard.dc.html`). Phase 1 is UI-only: no backend, no
-persistence — matches docs/HOPE_Dashboard_Design.md's scope for this phase.
+"""Static layout for the corkboard notes.
+
+Position, paper colour, tape/pin and rotation live here; the *content* of every
+note comes from the shared board at runtime (memory/board/), merged in by
+DashboardState.load_board(). Splitting it this way is what lets a note Pavan
+dragged somewhere stay there across the refresh loop.
+
+The prototype's chat fixtures (fake threads, fake agent roster, fake
+attachments) were deleted when text chat was removed: conversations are now
+read from episodic memory and the live feed, and HOPE takes voice input only.
 """
-
-AGENT_META = {
-    "HOPE": {"color": "oklch(0.72 0.15 305)", "initial": "H"},
-    "Scout": {"color": "oklch(0.75 0.14 150)", "initial": "S"},
-    "Ledger": {"color": "oklch(0.78 0.15 70)", "initial": "L"},
-}
-
-MODEL_OPTIONS = ["HOPE", "Scout", "Ledger"]
-ATTACH_TYPES = ["Image", "Document", "Audio", "Link"]
-MOCK_ATTACHMENT_NAMES = {
-    "Image": "photo.jpg",
-    "Document": "notes.pdf",
-    "Audio": "memo.m4a",
-    "Link": "reference-link",
-}
 
 NOTE_LAYOUT = [
     {
@@ -52,95 +43,5 @@ NOTE_LAYOUT = [
         "paper": "#fbd9ea", "tape": "#f0bdd8", "pin": "pin",
         "rotate": 1.5, "x": 290, "y": 470, "w": 230,
         "content": "", "note_agent": "",
-    },
-]
-
-INITIAL_CHATS = [
-    {
-        "id": "c1", "title": "Denver trip itinerary", "time": "2h",
-        "dot": "oklch(0.78 0.14 200)",
-        "messages": [
-            {
-                "id": "m1", "role": "user",
-                "text": "Can you help me plan a 3 day trip to Denver in October?",
-            },
-            {
-                "id": "m2", "role": "assistant", "agent": "Scout", "active_version": 0,
-                "versions": [
-                    "Sure — here's a solid 3-day outline: Day 1 arrive + explore "
-                    "RiNo district, Day 2 Rocky Mountain National Park day trip, "
-                    "Day 3 downtown + Union Station before your flight.",
-                    "Alternative plan leaning into hiking: Day 1 easy acclimation "
-                    "walk around Cherry Creek, Day 2 full day hike at Mount Falcon, "
-                    "Day 3 recovery brunch + Denver Art Museum.",
-                ],
-            },
-            {
-                "id": "m3", "role": "user",
-                "text": "Make day 2 more relaxed, I don't want a full hike.",
-            },
-            {
-                "id": "m4", "role": "assistant", "agent": "HOPE", "active_version": 0,
-                "versions": [
-                    "Got it — swap Day 2 for a relaxed loop: Denver Botanic "
-                    "Gardens in the morning, lunch in Cherry Creek, then a short "
-                    "scenic drive up Lookout Mountain for sunset.",
-                ],
-            },
-        ],
-    },
-    {
-        "id": "c2", "title": "Debug useEffect loop", "time": "5h",
-        "dot": "oklch(0.72 0.16 305)",
-        "messages": [
-            {
-                "id": "m1", "role": "user",
-                "text": "My useEffect keeps re-firing infinitely, any idea why?",
-            },
-            {
-                "id": "m2", "role": "assistant", "agent": "Ledger", "active_version": 0,
-                "versions": [
-                    "Most likely an object or function recreated on every render "
-                    "is in your dependency array. Wrap it in useCallback/useMemo, "
-                    "or move it outside the component.",
-                ],
-            },
-        ],
-    },
-    {
-        "id": "c3", "title": "Weekly meal plan", "time": "1d",
-        "dot": "oklch(0.75 0.14 150)",
-        "messages": [
-            {
-                "id": "m1", "role": "user",
-                "text": "Put together a simple high-protein meal plan for the week.",
-            },
-            {
-                "id": "m2", "role": "assistant", "agent": "HOPE", "active_version": 0,
-                "versions": [
-                    "Here's a 5-day plan: rotating chicken/eggs/greek yogurt "
-                    "bases, lean beef twice, salmon once, with overnight oats "
-                    "for breakfast each day.",
-                ],
-            },
-        ],
-    },
-    {
-        "id": "c4", "title": "Server migration checklist", "time": "3d",
-        "dot": "oklch(0.78 0.15 70)",
-        "messages": [
-            {
-                "id": "m1", "role": "user",
-                "text": "What should I check before migrating the prod DB this weekend?",
-            },
-            {
-                "id": "m2", "role": "assistant", "agent": "Ledger", "active_version": 0,
-                "versions": [
-                    "Checklist: full backup + restore test, freeze writes window, "
-                    "verify replica lag is zero, confirm rollback script, and "
-                    "alert the on-call channel before starting.",
-                ],
-            },
-        ],
     },
 ]

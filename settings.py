@@ -34,14 +34,23 @@ class Settings(BaseSettings):
     context_summarize_threshold: float = 0.9
     context_keep_recent: int = 6
     summarizer_model: str = "gpt-4o-mini"  # OpenAI model used to compress context
-    episodic_db_path: str = "data_store/episodic_memory/episodic.db"
-    episodic_media_dir: str = "data_store/episodic_memory/media"
-    chroma_persist_dir: str = "data_store/episodic_memory/chroma"
-    semantic_persist_dir: str = "data_store/semantic_memory/chroma"
-    semantic_history_db_path: str = "data_store/semantic_memory/history.db"
-    procedures_dir: str = "procedures"
-    blackboard_db_path: str = "data_store/coordination/blackboard.db"
+    # Every path below is absolute, anchored to this file's directory rather
+    # than the process CWD. Two processes read them from two different working
+    # directories (hope.py from the repo root, the dashboard from dashboard/),
+    # and a relative path silently resolves to two different files: the
+    # dashboard would read an empty database it created itself and show an
+    # empty history, with nothing failing anywhere.
+    episodic_db_path: str = str(_REPO_ROOT / "data_store/episodic_memory/episodic.db")
+    episodic_media_dir: str = str(_REPO_ROOT / "data_store/episodic_memory/media")
+    chroma_persist_dir: str = str(_REPO_ROOT / "data_store/episodic_memory/chroma")
+    semantic_persist_dir: str = str(_REPO_ROOT / "data_store/semantic_memory/chroma")
+    semantic_history_db_path: str = str(_REPO_ROOT / "data_store/semantic_memory/history.db")
+    procedures_dir: str = str(_REPO_ROOT / "procedures")
+    blackboard_db_path: str = str(_REPO_ROOT / "data_store/coordination/blackboard.db")
     board_db_path: str = str(_REPO_ROOT / "data_store/board/board.db")
+    # Absolute for the same reason as board_db_path: hope.py writes it, the
+    # dashboard process (CWD dashboard/) reads it.
+    live_db_path: str = str(_REPO_ROOT / "data_store/live/live.db")
     # Empty/None (the default) means "detect from the network" — see
     # memory/board/live.py:_resolve_location(). Set these in .env only to
     # override auto-detection (e.g. IP geolocation guesses wrong behind a VPN).

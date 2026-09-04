@@ -1,118 +1,220 @@
+"""Left rail: what HOPE is doing now, above everything it has done before.
+
+Live sits at the top as a pinned entry rather than a separate control, so the
+console has one selection model instead of a mode toggle. The rule the list
+follows: the archive holds finished conversations only, and the run in progress
+is always Live, never a row.
+"""
+
 import reflex as rx
 
 from dashboard import styles as s
 from dashboard.state import DashboardState
 
 
-def _chat_row(chat: rx.Var[dict]) -> rx.Component:
-    return rx.el.div(
+def _status_dot() -> rx.Component:
+    """The only dot in the product, and the only green. It reports whether the
+    voice pipeline is actually up, which is real state and the single most
+    important thing on the page."""
+    return rx.el.span(
+        style={
+            "width": "7px", "height": "7px", "borderRadius": s.RADIUS_PILL,
+            "flexShrink": 0,
+            "background": rx.cond(DashboardState.hope_is_running, s.LIVE, s.TEXT_MUTED),
+            "boxShadow": rx.cond(
+                DashboardState.hope_is_running, f"0 0 0 3px {s.LIVE_SOFT}", "none"
+            ),
+        },
+    )
+
+
+def _live_entry() -> rx.Component:
+    return rx.el.button(
+        _status_dot(),
         rx.cond(
-            DashboardState.sidebar_collapsed,
-            rx.el.div(
-                chat["initial"],
+            ~DashboardState.sidebar_collapsed,
+            rx.el.span(
+                rx.el.span(
+                    "Now",
+                    style={"fontSize": s.SIZE_BODY, "fontWeight": 600, "color": s.TEXT},
+                ),
+                rx.el.span(
+                    DashboardState.live_status_label,
+                    style={
+                        "fontFamily": s.FONT_MONO, "fontSize": s.SIZE_MICRO,
+                        "color": rx.cond(
+                            DashboardState.hope_is_running, s.LIVE, s.TEXT_MUTED
+                        ),
+                        "marginTop": "2px",
+                    },
+                ),
                 style={
-                    "width": "22px", "height": "22px", "borderRadius": "6px",
-                    "background": "oklch(0.28 0.016 255)", "color": "oklch(0.75 0.01 255)",
-                    "fontFamily": s.FONT_MONO, "fontSize": "11px", "fontWeight": 600,
-                    "display": "flex", "alignItems": "center", "justifyContent": "center",
-                    "flexShrink": 0,
+                    "display": "flex", "flexDirection": "column",
+                    "alignItems": "flex-start", "minWidth": 0, "flex": 1,
                 },
             ),
         ),
+        on_click=DashboardState.select_live,
+        aria_label="Show the current conversation",
+        style={
+            "display": "flex", "alignItems": "center", "gap": "10px", "width": "100%",
+            "padding": "11px 10px", "borderRadius": s.RADIUS, "cursor": "pointer",
+            "textAlign": "left", "fontFamily": s.FONT_SANS,
+            "background": rx.cond(
+                DashboardState.is_live_selected, s.ACCENT_SOFT, "transparent"
+            ),
+            "border": rx.cond(
+                DashboardState.is_live_selected,
+                f"1px solid {s.ACCENT}",
+                f"1px solid {s.BORDER}",
+            ),
+            "_hover": {"background": s.PANEL_RAISED},
+            "_focusVisible": s.FOCUS_RING,
+        },
+    )
+
+
+def _thread_row(thread: rx.Var[dict]) -> rx.Component:
+    return rx.el.button(
         rx.cond(
-            ~DashboardState.sidebar_collapsed,
+            DashboardState.sidebar_collapsed,
+            rx.el.span(
+                thread["ago"],
+                style={
+                    "fontFamily": s.FONT_MONO, "fontSize": s.SIZE_MICRO,
+                    "color": s.TEXT_DIM, "width": "100%", "textAlign": "center",
+                },
+            ),
             rx.fragment(
-                rx.el.div(
-                    rx.el.div(
-                        chat["title"],
+                rx.el.span(
+                    rx.el.span(
+                        thread["headline"],
                         style={
-                            "fontSize": "12.5px", "fontWeight": 500, "color": "oklch(0.9 0.006 255)",
-                            "whiteSpace": "nowrap", "overflow": "hidden", "textOverflow": "ellipsis",
+                            "fontSize": s.SIZE_META, "fontWeight": 500, "color": s.TEXT,
+                            "display": "block", "overflow": "hidden",
+                            "textOverflow": "ellipsis", "whiteSpace": "nowrap",
                         },
                     ),
-                    rx.el.div(
-                        chat["preview"],
+                    rx.el.span(
+                        thread["count_label"],
+                        class_name="tabular",
                         style={
-                            "fontSize": "10.5px", "fontFamily": s.FONT_MONO, "color": s.TEXT_DIMMER,
-                            "whiteSpace": "nowrap", "overflow": "hidden", "textOverflow": "ellipsis",
-                            "marginTop": "2px",
+                            "fontFamily": s.FONT_MONO, "fontSize": s.SIZE_MICRO,
+                            "color": s.TEXT_MUTED, "marginTop": "3px", "display": "block",
                         },
                     ),
                     style={"minWidth": 0, "flex": 1},
                 ),
-                rx.el.div(
-                    chat["time"],
-                    style={"fontSize": "9.5px", "fontFamily": s.FONT_MONO, "color": "oklch(0.45 0.012 255)", "flexShrink": 0},
+                rx.el.span(
+                    thread["ago"],
+                    class_name="tabular",
+                    style={
+                        "fontFamily": s.FONT_MONO, "fontSize": s.SIZE_MICRO,
+                        "color": s.TEXT_MUTED, "flexShrink": 0, "alignSelf": "flex-start",
+                    },
                 ),
             ),
         ),
-        on_click=DashboardState.select_chat(chat["id"]),
+        on_click=DashboardState.select_thread(thread["id"]),
         style={
-            "display": "flex", "alignItems": "center", "gap": "10px", "padding": "10px 9px",
-            "borderRadius": "4px", "cursor": "pointer", "marginBottom": "3px",
-            "background": rx.cond(chat["active"], "oklch(0.26 0.02 255)", "transparent"),
-            "border": rx.cond(chat["active"], "1px solid oklch(0.4 0.03 255)", "1px solid transparent"),
+            "display": "flex", "alignItems": "center", "gap": "10px", "width": "100%",
+            "padding": "10px", "borderRadius": s.RADIUS, "cursor": "pointer",
+            "marginBottom": "2px", "textAlign": "left", "fontFamily": s.FONT_SANS,
+            "background": rx.cond(thread["active"], s.ACCENT_SOFT, "transparent"),
+            "border": rx.cond(
+                thread["active"], f"1px solid {s.ACCENT}", "1px solid transparent"
+            ),
+            "_hover": {"background": s.PANEL_RAISED},
+            "_focusVisible": s.FOCUS_RING,
+        },
+    )
+
+
+def _empty_archive() -> rx.Component:
+    return rx.el.p(
+        "Conversations appear here once a session ends.",
+        style={
+            "fontSize": s.SIZE_MICRO, "color": s.TEXT_MUTED, "padding": "10px",
+            "lineHeight": 1.5, "margin": 0,
         },
     )
 
 
 def sidebar() -> rx.Component:
-    return rx.el.div(
-        rx.el.div(style=s.CORNER_BRACKET_TR),
-        rx.el.div(style=s.CORNER_BRACKET_BR),
+    return rx.el.aside(
+        rx.el.div(style=s.corner_bracket("top", "right")),
+        rx.el.div(style=s.corner_bracket("bottom", "right")),
+        # brand
         rx.el.div(
-            rx.el.div(style={"width": "9px", "height": "9px", "borderRadius": "2px", "background": s.ACCENT, "flexShrink": 0}),
+            rx.el.span(
+                style={
+                    "width": "9px", "height": "9px", "borderRadius": "2px",
+                    "background": s.ACCENT, "flexShrink": 0,
+                },
+            ),
             rx.cond(
                 ~DashboardState.sidebar_collapsed,
-                rx.el.div(
-                    "HOPE ",
-                    rx.el.span("// sys", style={"opacity": 0.4, "letterSpacing": "1px"}),
+                rx.el.span(
+                    "HOPE",
                     style={
-                        "fontFamily": s.FONT_MONO, "fontWeight": 600, "fontSize": "13px",
-                        "letterSpacing": "2.5px", "whiteSpace": "nowrap", "textTransform": "uppercase",
+                        "fontFamily": s.FONT_MONO, "fontWeight": 600,
+                        "fontSize": s.SIZE_BODY, "letterSpacing": "2px",
+                        "color": s.TEXT,
                     },
                 ),
             ),
             rx.el.button(
                 rx.cond(DashboardState.sidebar_collapsed, "»", "«"),
                 on_click=DashboardState.toggle_sidebar,
+                aria_label=rx.cond(
+                    DashboardState.sidebar_collapsed,
+                    "Expand sidebar",
+                    "Collapse sidebar",
+                ),
                 style={
-                    "marginLeft": "auto", "width": "26px", "height": "26px", "borderRadius": "4px",
-                    "border": f"1px solid {s.BORDER_STRONG}", "background": "oklch(0.22 0.014 255)",
-                    "color": "oklch(0.72 0.01 255)", "cursor": "pointer", "fontSize": "13px",
-                    "display": "flex", "alignItems": "center", "justifyContent": "center", "flexShrink": 0,
+                    "marginLeft": "auto", "width": "28px", "height": "28px",
+                    "borderRadius": s.RADIUS, "border": f"1px solid {s.BORDER_STRONG}",
+                    "background": s.PANEL_RAISED, "color": s.TEXT_DIM,
+                    "cursor": "pointer", "fontSize": s.SIZE_BODY, "flexShrink": 0,
+                    "display": "flex", "alignItems": "center", "justifyContent": "center",
+                    "_hover": {"color": s.TEXT},
+                    "_focusVisible": s.FOCUS_RING,
                 },
             ),
-            style={"display": "flex", "alignItems": "center", "gap": "10px", "padding": "18px 16px", "borderBottom": f"1px solid {s.BORDER}", "minHeight": "28px"},
+            style={
+                "display": "flex", "alignItems": "center", "gap": "10px",
+                "padding": "16px 14px", "borderBottom": f"1px solid {s.BORDER}",
+            },
         ),
-        rx.el.div(
-            rx.el.button(
-                "+", on_click=DashboardState.new_chat, title="new chat",
-                style={
-                    "width": "36px", "height": "36px", "borderRadius": "50%",
-                    "border": f"1px solid {s.ACCENT}", "background": "transparent", "color": s.ACCENT,
-                    "fontSize": "18px", "fontWeight": 600, "cursor": "pointer",
-                    "display": "flex", "alignItems": "center", "justifyContent": "center", "lineHeight": 1,
-                },
-            ),
-            style={"padding": "12px"},
-        ),
-        rx.el.div(
-            rx.foreach(DashboardState.chat_list, _chat_row),
-            style={"flex": 1, "overflowY": "auto", "padding": "4px 10px 10px"},
-        ),
+        # now
+        rx.el.div(_live_entry(), style={"padding": "12px 10px 10px"}),
+        # archive
         rx.cond(
             ~DashboardState.sidebar_collapsed,
-            rx.el.div(
-                "HOPE v0.9 · personal assistant",
-                style={"padding": "12px 16px", "borderTop": f"1px solid {s.BORDER}", "fontFamily": s.FONT_MONO, "fontSize": "10px", "color": "oklch(0.45 0.012 255)"},
+            rx.el.h2(
+                "Earlier",
+                style={
+                    "fontSize": s.SIZE_MICRO, "fontWeight": 600, "color": s.TEXT_MUTED,
+                    "margin": 0, "padding": "6px 12px 8px",
+                    "borderTop": f"1px solid {s.BORDER}",
+                },
             ),
+        ),
+        rx.el.div(
+            rx.cond(
+                DashboardState.sessions.length() > 0,
+                rx.foreach(DashboardState.thread_rows, _thread_row),
+                rx.cond(~DashboardState.sidebar_collapsed, _empty_archive()),
+            ),
+            class_name="panel-scroll",
+            style={"flex": 1, "overflowY": "auto", "padding": "0 10px 12px"},
         ),
         style={
             "position": "absolute", "left": 0, "top": "12px", "bottom": "12px",
-            "width": rx.cond(DashboardState.sidebar_collapsed, "64px", "260px"),
+            "width": rx.cond(DashboardState.sidebar_collapsed, "68px", "268px"),
             "background": s.PANEL_BG, "border": f"1px solid {s.BORDER}",
-            "borderRadius": "0 4px 4px 0", "display": "flex", "flexDirection": "column",
-            "transition": "width 0.2s ease", "zIndex": 20, "overflow": "visible",
+            "borderLeft": "none", "borderRadius": f"0 {s.RADIUS} {s.RADIUS} 0",
+            "display": "flex", "flexDirection": "column",
+            "transition": "width 0.18s ease", "zIndex": 20,
         },
     )

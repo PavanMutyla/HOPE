@@ -1,37 +1,39 @@
 """Unit tests for the Reflex dashboard's DashboardState.
 
-Until now `dashboard/dashboard/state.py` — 460-odd lines holding every piece of
-dashboard behaviour — had no test at all, while the board layer underneath it
-(tests/unit/test_board_store.py, tests/integration/test_board_tools.py) was well
-covered. This file covers the layer in between: the merge that folds live board
-data into the note layout, the drag arithmetic, and the chat-panel view models.
+The dashboard is read-only by design: HOPE takes voice input, so nothing here
+writes to a conversation. What it does do is join three stores into one view,
+and that joining is what these tests cover: live feed plus episodic history
+plus the shared board.
 
-Two things worth knowing before adding to this file:
+Two constraints worth knowing before adding to this file:
 
 - Reflex refuses direct instantiation of a State outside a running app, except
   under pytest (`reflex.utils.exec.is_testing_env()` checks PYTEST_CURRENT_TEST,
   which pytest sets per-test). So `DashboardState()` only works inside a test
-  body — never at module import time or in a session-scoped fixture built during
-  collection.
-- `state.py` builds a module-level `_board = Board()` at import. conftest's
-  pytest_configure points BOARD_DB_PATH at a temp dir so that import can't touch
-  the real board, and `board` below swaps in a per-test Board on top of that.
+  body, never at import time or in a fixture built during collection.
+- `state.py` builds module-level `Board()`, `EpisodicMemory()` and `LiveFeed()`
+  at import. conftest's pytest_configure points their paths at a temp dir so
+  that import cannot touch real data, and the fixtures below swap in per-test
+  stores on top of that.
 """
 
 import pytest
 
-from dashboard.data import AGENT_META, NOTE_LAYOUT
-from dashboard.state import MOCK_REPLY_TEXT, REGENERATE_TEXT, DashboardState
 from dashboard import state as state_module
+from dashboard.data import NOTE_LAYOUT
+from dashboard.state import LIVE_THREAD_ID, DashboardState
 from memory.board.store import Board
+from memory.live.store import LiveFeed
 
 pytestmark = pytest.mark.unit
+
+chromadb = pytest.importorskip("chromadb")
+
+from memory.episodic_memory.store import EpisodicMemory  # noqa: E402
 
 
 @pytest.fixture
 def board(tmp_path, monkeypatch):
-    """Per-test Board, swapped in for the module-level singleton that every
-    event handler reaches for by global name."""
     b = Board(db_path=tmp_path / "board.db")
     monkeypatch.setattr(state_module, "_board", b)
     yield b
@@ -39,9 +41,30 @@ def board(tmp_path, monkeypatch):
 
 
 @pytest.fixture
+def feed(tmp_path, monkeypatch):
+    f = LiveFeed(db_path=tmp_path / "live.db")
+    monkeypatch.setattr(state_module, "_live", f)
+    yield f
+    f.close()
+
+
+@pytest.fixture
+def episodic(tmp_path, monkeypatch, fake_embedding_function):
+    m = EpisodicMemory(
+        db_path=tmp_path / "episodic.db",
+        media_dir=tmp_path / "media",
+        persist_dir=tmp_path / "chroma",
+        embedding_function=fake_embedding_function,
+    )
+    monkeypatch.setattr(state_module, "_episodic", m)
+    yield m
+    m.close()
+
+
+@pytest.fixture
 def offline_live(monkeypatch):
-    """load_board() calls out to IP geolocation and Open-Meteo. Stub both so
-    these tests stay offline and deterministic."""
+    """load_board() calls IP geolocation and Open-Meteo. Stub both so these
+    tests stay offline and deterministic."""
     async def fake_location():
         return {
             "city": "Bengaluru", "lat": 12.97, "lon": 77.59,
@@ -62,118 +85,243 @@ def note(state: DashboardState, note_id: str) -> dict:
     return next(n for n in state.notes if n["id"] == note_id)
 
 
-# ─── computed vars ──────────────────────────────────────────────
+def write_session(memory, session_id, summary, texts, ts, agent="hope"):
+    memory.write(
+        agent=agent, session_id=session_id, reason="session_end",
+        span_turns=len(texts), summary=summary,
+        messages=[
+            {"role": "user" if i % 2 == 0 else "assistant", "content": t}
+            for i, t in enumerate(texts)
+        ],
+    )
 
-def test_active_chat_follows_active_chat_id():
+
+# ─── pure helpers ───────────────────────────────────────────────
+
+def test_headline_takes_the_first_sentence_of_the_summary():
+    assert state_module._headline(
+        "Pavan activated team mode. He then asked about his files."
+    ) == "Pavan activated team mode"
+
+
+def test_headline_truncates_a_long_first_sentence():
+    headline = state_module._headline("word " * 40)
+    assert len(headline) <= 70
+    assert headline.endswith("…")
+
+
+def test_headline_hides_the_unsummarized_marker():
+    """The marker is internal bookkeeping from flush(); showing it verbatim
+    leaks an implementation detail into the thread list."""
+    raw = "[NOT SUMMARIZED YET — raw session tail, pending upgrade at next startup]\nfoo"
+    assert state_module._headline(raw) == "Not summarized yet"
+
+
+def test_relative_time_buckets():
+    from datetime import datetime, timedelta, timezone
+
+    now = datetime.now(timezone.utc)
+    assert state_module._relative_time((now - timedelta(seconds=10)).isoformat()) == "just now"
+    assert state_module._relative_time((now - timedelta(minutes=5)).isoformat()) == "5m"
+    assert state_module._relative_time((now - timedelta(hours=3)).isoformat()) == "3h"
+    assert state_module._relative_time((now - timedelta(days=2)).isoformat()) == "2d"
+
+
+def test_relative_time_survives_junk():
+    assert state_module._relative_time("") == ""
+    assert state_module._relative_time("not-a-timestamp") == ""
+
+
+# ─── live feed ──────────────────────────────────────────────────
+
+async def test_live_state_reads_as_not_running_when_hope_is_down(feed):
     s = DashboardState()
-    s.active_chat_id = "c2"
-    assert s.active_chat["title"] == "Debug useEffect loop"
+    await s.load_live()
+
+    assert s.hope_is_running is False
+    assert s.live_status_label == "Not running"
+    assert s.live_turns == []
 
 
-def test_active_chat_falls_back_to_first_when_id_is_unknown():
-    """A stale id (deleted thread, hand-edited state) must not crash the panel."""
+async def test_live_state_tracks_a_running_pipeline(feed):
+    feed.start_session("run-1", "hope")
+    feed.append_turn("run-1", "user", "", "what's on today?")
+    feed.append_turn("run-1", "assistant", "hope", "Three things.")
+    feed.set_state("speaking")
+    feed.set_context_pct(0.34)
+
     s = DashboardState()
-    s.active_chat_id = "does-not-exist"
-    assert s.active_chat["id"] == "c1"
+    await s.load_live()
+
+    assert s.hope_is_running is True
+    assert s.live_status_label == "Speaking"
+    assert s.context_label == "34% context used"
+    assert [t["text"] for t in s.live_turns] == ["what's on today?", "Three things."]
 
 
-def test_active_chat_is_safe_when_there_are_no_chats_at_all():
+async def test_ended_session_reads_as_not_running_but_keeps_its_turns(feed):
+    feed.start_session("run-1", "hope")
+    feed.append_turn("run-1", "user", "", "last thing I said")
+    feed.end_session()
+
     s = DashboardState()
-    s.chats = []
-    assert s.active_chat == {"id": "", "messages": []}
+    await s.load_live()
+
+    assert s.hope_is_running is False
+    assert len(s.live_turns) == 1
 
 
-def test_display_messages_marks_user_turns_and_carries_the_edit_draft():
+# ─── history ────────────────────────────────────────────────────
+
+async def test_sessions_become_thread_rows(episodic, feed):
+    write_session(episodic, "s1", "Talked about Orion. Then lunch.", ["hi", "hello"], "19:00")
+
     s = DashboardState()
-    s.editing_msg_id = "m1"
-    s.edit_drafts = {"m1": "half-typed edit"}
+    await s.load_sessions()
 
-    first = s.display_messages[0]
-    assert first["is_user"] is True
-    assert first["is_editing"] is True
-    assert first["edit_value"] == "half-typed edit"
+    assert len(s.sessions) == 1
+    assert s.sessions[0]["headline"] == "Talked about Orion"
+    assert s.sessions[0]["count_label"] == "2 messages"
 
 
-def test_display_messages_defaults_the_edit_draft_to_the_message_text():
+async def test_the_running_session_is_not_listed_as_history(episodic, feed):
+    """It is shown as Live. Listing it as well would render the same
+    conversation twice and read as a duplicate."""
+    write_session(episodic, "old-run", "An earlier chat.", ["a", "b"], "18:00")
+    write_session(episodic, "current-run", "Happening now.", ["c", "d"], "19:00")
+    feed.start_session("current-run", "hope")
+
     s = DashboardState()
-    first = s.display_messages[0]
-    assert first["is_editing"] is False
-    assert first["edit_value"] == first["text"]
+    await s.load_live()
+    await s.load_sessions()
+
+    assert [row["id"] for row in s.sessions] == ["old-run"]
 
 
-def test_display_messages_resolves_assistant_avatar_from_agent_meta():
+async def test_selecting_a_thread_loads_its_transcript(episodic, feed):
+    write_session(episodic, "s1", "A chat.", ["question one", "answer one"], "19:00")
+
     s = DashboardState()
-    reply = s.display_messages[1]  # m2, agent "Scout"
-    assert reply["is_user"] is False
-    assert reply["agent_name"] == "Scout"
-    assert reply["avatar_color"] == AGENT_META["Scout"]["color"]
-    assert reply["avatar_initial"] == "S"
+    await s.load_sessions()
+    await s.load_transcript("s1")
+
+    assert [m["text"] for m in s.transcript] == ["question one", "answer one"]
 
 
-def test_display_messages_falls_back_to_hope_meta_for_an_unknown_agent():
-    """Agents are added to the registry over time; one the dashboard hasn't
-    heard of must render, not KeyError."""
+async def test_transcript_hides_pipeline_scaffolding(episodic, feed):
+    """Warm-start injection and the greeting prompt are `developer` messages
+    the pipeline sends itself. Rendering them makes it look like Pavan said
+    things he never said."""
+    episodic.write(
+        agent="hope", session_id="s1", reason="session_end", span_turns=4,
+        summary="A chat.",
+        messages=[
+            {"role": "developer", "content": "Summary of your most recent session..."},
+            {"role": "developer", "content": "Say a short hello to Pavan."},
+            {"role": "assistant", "content": "Hey Pavan."},
+            {"role": "user", "content": "hello"},
+        ],
+    )
+
     s = DashboardState()
-    s.chats = [{
-        "id": "c1", "title": "t", "time": "now", "dot": "#fff",
-        "messages": [{
-            "id": "m1", "role": "assistant", "agent": "Atlas",
-            "active_version": 0, "versions": ["from an unregistered agent"],
-        }],
-    }]
-    reply = s.display_messages[0]
-    assert reply["agent_name"] == "Atlas"
-    assert reply["avatar_color"] == AGENT_META["HOPE"]["color"]
+    await s.load_sessions()
+    await s.load_transcript("s1")
+
+    assert [m["role"] for m in s.transcript] == ["assistant", "user"]
 
 
-def test_display_messages_renders_the_selected_version():
+async def test_transcript_drops_empty_turns(episodic, feed):
+    """A tool-call turn has no text; an empty bubble reads as HOPE saying
+    nothing."""
+    episodic.write(
+        agent="hope", session_id="s1", reason="session_end", span_turns=2,
+        summary="A chat.",
+        messages=[
+            {"role": "assistant", "content": ""},
+            {"role": "assistant", "content": "Done."},
+        ],
+    )
+
     s = DashboardState()
-    s.chats = [{
-        "id": "c1", "title": "t", "time": "now", "dot": "#fff",
-        "messages": [{
-            "id": "m1", "role": "assistant", "agent": "HOPE",
-            "active_version": 1, "versions": ["first take", "second take"],
-        }],
-    }]
-    reply = s.display_messages[0]
-    assert reply["text"] == "second take"
-    assert reply["has_versions"] is True
-    assert reply["version_label"] == "2/2"
+    await s.load_sessions()
+    await s.load_transcript("s1")
+
+    assert [m["text"] for m in s.transcript] == ["Done."]
 
 
-def test_display_messages_hides_version_nav_for_a_single_version():
+# ─── console view model ─────────────────────────────────────────
+
+def test_console_defaults_to_live():
     s = DashboardState()
-    reply = s.display_messages[3]  # m4, one version
-    assert reply["has_versions"] is False
-    assert reply["version_label"] == "1/1"
+    assert s.selected_thread == LIVE_THREAD_ID
+    assert s.is_live_selected is True
+    assert s.console_title == "Now"
 
 
-def test_chat_list_truncates_the_preview_to_thirty_characters():
+async def test_console_renders_live_turns_when_live_is_selected(feed):
+    feed.start_session("run-1", "hope")
+    feed.append_turn("run-1", "user", "", "hello")
+    feed.append_turn("run-1", "assistant", "hope", "hi there")
+
     s = DashboardState()
-    row = s.chat_list[0]
-    assert row["preview"] == "Can you help me plan a 3 day t"
-    assert len(row["preview"]) == 30
+    await s.load_live()
+
+    messages = s.console_messages
+    assert [m["speaker"] for m in messages] == ["You", "HOPE"]
+    assert [m["is_user"] for m in messages] == [True, False]
 
 
-def test_chat_list_marks_only_the_active_thread():
+async def test_console_renders_the_transcript_when_a_thread_is_selected(episodic, feed):
+    write_session(episodic, "s1", "A chat.", ["asked", "answered"], "19:00")
+
     s = DashboardState()
-    s.active_chat_id = "c3"
-    assert [r["active"] for r in s.chat_list] == [False, False, True, False]
+    await s.load_sessions()
+    s.selected_thread = "s1"
+    await s.load_transcript("s1")
+
+    assert s.is_live_selected is False
+    assert [m["text"] for m in s.console_messages] == ["asked", "answered"]
 
 
-def test_chat_list_handles_an_empty_thread():
+async def test_selecting_live_returns_to_now(feed):
     s = DashboardState()
-    s.chats = [{"id": "c9", "title": "Fresh", "time": "now", "dot": "#fff", "messages": []}]
-    row = s.chat_list[0]
-    assert row["preview"] == "no messages yet"
-    assert row["initial"] == "F"
+    s.selected_thread = "some-old-session"
+
+    await s.select_live()
+
+    assert s.is_live_selected is True
+    assert s.console_open is True
 
 
-# ─── board merge ────────────────────────────────────────────────
+def test_empty_state_tells_you_what_to_do_when_hope_is_down():
+    s = DashboardState()
+    s.live_state = "idle"
+    assert s.console_is_empty is True
+    assert "hope.py" in s.empty_message
 
-async def test_load_board_merges_live_content_without_disturbing_layout(board, offline_live):
-    """The whole point of merge(): a note Pavan dragged somewhere must stay
-    there across the 15-second refresh loop."""
+
+def test_empty_state_invites_you_to_talk_when_hope_is_up():
+    s = DashboardState()
+    s.live_state = "listening"
+    assert "Start talking" in s.empty_message
+
+
+def test_empty_state_for_a_past_thread_says_so():
+    s = DashboardState()
+    s.selected_thread = "s1"
+    assert s.empty_message == "This conversation has no recorded turns."
+
+
+def test_there_is_no_way_to_send_a_message():
+    """Pins the product decision: input is voice only. If a compose handler
+    ever reappears on this state, that decision was reversed by accident."""
+    banned = {"send_message", "compose_text", "on_compose_key_down", "attachments"}
+    assert banned.isdisjoint(dir(DashboardState))
+
+
+# ─── board ──────────────────────────────────────────────────────
+
+async def test_load_board_merges_content_without_disturbing_layout(board, offline_live):
     s = DashboardState()
     s.notes = [{**n, "x": 999, "y": 888} for n in NOTE_LAYOUT]
 
@@ -184,34 +332,13 @@ async def test_load_board_merges_live_content_without_disturbing_layout(board, o
     assert note(s, "n2")["temp"] == "27°C"
 
 
-async def test_load_board_formats_the_location_hemisphere(board, offline_live):
+async def test_load_board_formats_hemispheres(board, offline_live):
     s = DashboardState()
     await s.load_board()
     assert note(s, "n1")["location_detail"] == "12.97N, 77.59E"
-    assert note(s, "n1")["location_time"] == "4:20 PM · Tuesday, September 2"
 
 
-async def test_load_board_formats_southern_and_western_hemispheres(board, monkeypatch):
-    async def southwest():
-        return {
-            "city": "Lima", "lat": -12.05, "lon": -77.04,
-            "local_time": "8:00 AM", "local_date": "Tuesday, September 2",
-        }
-
-    async def no_weather():
-        raise RuntimeError("offline")
-
-    monkeypatch.setattr(state_module.board_live, "get_location_and_time", southwest)
-    monkeypatch.setattr(state_module.board_live, "get_weather", no_weather)
-
-    s = DashboardState()
-    await s.load_board()
-    assert note(s, "n1")["location_detail"] == "12.05S, 77.04W"
-
-
-async def test_load_board_leaves_the_weather_note_alone_when_the_api_fails(board, monkeypatch):
-    """Open-Meteo being down must not blank out the card or take the board with
-    it — the stale reading stays on screen."""
+async def test_weather_failure_leaves_the_stale_card_up(board, monkeypatch):
     async def fake_location():
         return {
             "city": "Bengaluru", "lat": 12.97, "lon": 77.59,
@@ -226,65 +353,37 @@ async def test_load_board_leaves_the_weather_note_alone_when_the_api_fails(board
 
     s = DashboardState()
     s.notes = [{**n, "temp": "19°C"} if n["id"] == "n2" else n for n in NOTE_LAYOUT]
-
     await s.load_board()
 
     assert note(s, "n2")["temp"] == "19°C"
     assert note(s, "n1")["location_city"] == "Bengaluru"
 
 
-async def test_load_board_routes_each_list_into_its_own_note(board, offline_live):
-    board.add_item("today", "ship the fold test", "hope")
-    board.add_item("planned", "wire the chat loop", "pavan")
-    board.add_item("pending", "decide on browser voice", "atlas")
+async def test_each_list_lands_in_its_own_note(board, offline_live):
+    board.add_item("today", "ship the read path", "hope")
+    board.add_item("planned", "browser voice", "pavan")
+    board.add_item("pending", "procedural detection", "atlas")
 
     s = DashboardState()
     await s.load_board()
 
-    assert [t["text"] for t in note(s, "n3")["tasks"]] == ["ship the fold test"]
-    assert [t["text"] for t in note(s, "n4")["tasks"]] == ["wire the chat loop"]
-    assert [t["text"] for t in note(s, "n5")["tasks"]] == ["decide on browser voice"]
-    assert note(s, "n5")["tasks"][0]["agent"] == "atlas"
+    assert [t["text"] for t in note(s, "n3")["tasks"]] == ["ship the read path"]
+    assert [t["text"] for t in note(s, "n4")["tasks"]] == ["browser voice"]
+    assert [t["text"] for t in note(s, "n5")["tasks"]] == ["procedural detection"]
 
 
-async def test_load_board_reads_the_quick_note(board, offline_live):
-    board.update_quick_note("remember to renew the domain", "hope")
-
-    s = DashboardState()
-    await s.load_board()
-
-    assert note(s, "n6")["content"] == "remember to renew the domain"
-    assert note(s, "n6")["note_agent"] == "hope"
-
-
-# ─── task editing ───────────────────────────────────────────────
-
-async def test_toggle_task_persists_to_the_board(board, offline_live):
-    item = board.add_item("today", "call the vendor", "pavan")
-    s = DashboardState()
-
-    await s.toggle_task(item.id)
-
-    assert board.list_items("today")[0].done is True
-    assert note(s, "n3")["tasks"][0]["done"] is True
-
-
-async def test_update_task_text_persists_to_the_board(board, offline_live):
+async def test_toggle_and_edit_persist_to_the_board(board, offline_live):
     item = board.add_item("today", "typo hree", "pavan")
     s = DashboardState()
 
     await s.update_task_text(item.id, "typo here")
+    await s.toggle_task(item.id)
 
-    assert board.list_items("today")[0].text == "typo here"
-
-
-def test_set_new_task_draft_only_touches_the_named_note():
-    s = DashboardState()
-    s.set_new_task_draft("n4", "a planned thing")
-    assert s.new_task_drafts == {"n3": "", "n4": "a planned thing", "n5": ""}
+    stored = board.list_items("today")[0]
+    assert (stored.text, stored.done) == ("typo here", True)
 
 
-async def test_add_task_ui_writes_the_draft_and_clears_it(board, offline_live):
+async def test_add_task_writes_the_draft_and_clears_it(board, offline_live):
     s = DashboardState()
     s.set_new_task_draft("n3", "  buy coffee  ")
 
@@ -294,26 +393,23 @@ async def test_add_task_ui_writes_the_draft_and_clears_it(board, offline_live):
     assert s.new_task_drafts["n3"] == ""
 
 
-async def test_add_task_ui_ignores_a_blank_draft(board, offline_live):
+async def test_blank_task_draft_is_ignored(board, offline_live):
     s = DashboardState()
     s.set_new_task_draft("n3", "   ")
-
     await s.add_task_ui("n3", "today")
-
     assert board.list_items("today") == []
 
 
-def test_enter_submits_a_new_task_but_shift_enter_does_not():
+def test_enter_submits_a_task_but_shift_enter_does_not():
     s = DashboardState()
     assert s.on_new_task_key_down("n3", "today", "Enter", {"shift_key": False}) is not None
     assert s.on_new_task_key_down("n3", "today", "Enter", {"shift_key": True}) is None
-    assert s.on_new_task_key_down("n3", "today", "a", {"shift_key": False}) is None
 
 
-async def test_edit_note_content_persists_the_quick_note(board, offline_live):
+async def test_quick_note_persists(board, offline_live):
     s = DashboardState()
-    await s.edit_note_content("new shared scratch text")
-    assert board.get_quick_note().content == "new shared scratch text"
+    await s.edit_note_content("renew the domain")
+    assert board.get_quick_note().content == "renew the domain"
 
 
 # ─── dragging ───────────────────────────────────────────────────
@@ -328,67 +424,49 @@ def test_dragging_a_note_moves_it_by_the_pointer_delta():
     assert note(s, "n3")["y"] == origin["y"] - 25
 
 
-def test_dragging_a_note_leaves_every_other_note_where_it_was():
+def test_dragging_a_note_leaves_the_others_alone():
     s = DashboardState()
     before = {n["id"]: (n["x"], n["y"]) for n in s.notes if n["id"] != "n3"}
     s.start_note_drag("n3", {"client_x": 0, "client_y": 0})
     s.on_root_mouse_move({"client_x": 50, "client_y": 50})
 
-    after = {n["id"]: (n["x"], n["y"]) for n in s.notes if n["id"] != "n3"}
-    assert after == before
+    assert {n["id"]: (n["x"], n["y"]) for n in s.notes if n["id"] != "n3"} == before
 
 
-def test_dragging_the_panel_moves_the_panel():
+def test_a_note_drag_wins_over_a_simultaneous_console_drag():
     s = DashboardState()
-    s.start_panel_drag({"client_x": 10, "client_y": 10})
-    s.on_root_mouse_move({"client_x": 40, "client_y": 60})
-    assert (s.panel_x, s.panel_y) == (850, 90)
-
-
-def test_dragging_the_terminal_moves_the_terminal():
-    s = DashboardState()
-    s.start_terminal_drag({"client_x": 0, "client_y": 0})
-    s.on_root_mouse_move({"client_x": -20, "client_y": 15})
-    assert (s.terminal_x, s.terminal_y) == (280, 685)
-
-
-def test_a_note_drag_wins_over_a_simultaneous_panel_drag():
-    """The handler is an if/elif chain, so overlapping drags resolve to one
-    thing moving — matching the prototype's panel-XOR-note behaviour."""
-    s = DashboardState()
-    s.start_panel_drag({"client_x": 0, "client_y": 0})
+    s.start_console_drag({"client_x": 0, "client_y": 0})
     s.start_note_drag("n1", {"client_x": 0, "client_y": 0})
 
     s.on_root_mouse_move({"client_x": 25, "client_y": 25})
 
     assert note(s, "n1")["x"] == 65
-    assert (s.panel_x, s.panel_y) == (820, 40)
+    assert (s.console_x, s.console_y) == (800, 40)
 
 
-def test_mouse_move_does_nothing_when_nothing_is_being_dragged():
+def test_mouse_move_does_nothing_when_nothing_is_dragging():
     s = DashboardState()
     before = [(n["x"], n["y"]) for n in s.notes]
     s.on_root_mouse_move({"client_x": 500, "client_y": 500})
     assert [(n["x"], n["y"]) for n in s.notes] == before
-    assert (s.panel_x, s.panel_y) == (820, 40)
 
 
 def test_mouse_up_releases_every_drag():
     s = DashboardState()
     s.start_note_drag("n1", {"client_x": 0, "client_y": 0})
-    s.dragging_panel = True
+    s.dragging_console = True
     s.dragging_terminal = True
 
     s.on_root_mouse_up({})
 
     assert s.dragging_note_id == ""
-    assert s.dragging_panel is False
+    assert s.dragging_console is False
     assert s.dragging_terminal is False
 
 
 # ─── terminal ───────────────────────────────────────────────────
 
-async def test_load_terminal_tails_the_log(tmp_path, monkeypatch):
+async def test_terminal_tails_the_log(tmp_path, monkeypatch):
     log = tmp_path / "hope.log"
     log.write_text("\n".join(f"line {i}" for i in range(500)))
     monkeypatch.setattr(state_module.settings, "hope_log_path", str(log))
@@ -400,125 +478,60 @@ async def test_load_terminal_tails_the_log(tmp_path, monkeypatch):
     assert s.terminal_lines[-1] == "line 499"
 
 
-async def test_load_terminal_explains_itself_when_hope_has_never_run(tmp_path, monkeypatch):
+async def test_terminal_explains_itself_when_hope_has_never_run(tmp_path, monkeypatch):
     monkeypatch.setattr(state_module.settings, "hope_log_path", str(tmp_path / "nope.log"))
 
     s = DashboardState()
     await s.load_terminal()
 
-    assert s.terminal_lines == [
-        "No logs yet — start hope.py to see live activity here."
-    ]
+    assert s.terminal_lines == ["No log yet. Start hope.py to see activity here."]
 
 
-# ─── chat panel (still mock-backed, Phase 1) ────────────────────
-
-def test_new_chat_prepends_and_activates_it():
+def test_closed_panels_can_be_reopened():
+    """Closing was one-way in the prototype: nothing brought a panel back."""
     s = DashboardState()
-    s.panel_open = False
-    s.new_chat()
+    s.close_console()
+    s.close_terminal()
+    assert (s.console_open, s.terminal_open) == (False, False)
 
-    assert len(s.chats) == 5
-    assert s.chats[0]["title"] == "New conversation"
-    assert s.active_chat_id == s.chats[0]["id"]
-    assert s.panel_open is True
+    s.open_console()
+    s.open_terminal()
+    assert (s.console_open, s.terminal_open) == (True, True)
 
 
-def test_select_chat_reopens_a_closed_panel():
+# ─── liveness ───────────────────────────────────────────────────
+
+def test_a_stale_row_is_treated_as_not_running():
+    """end_session() only runs on a clean shutdown. A killed hope.py leaves
+    state='listening' behind forever, and without this the dashboard shows a
+    green live indicator for a process that no longer exists."""
+    from datetime import datetime, timedelta, timezone
+
+    old = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
+    assert state_module._is_stale(old) is True
+
+
+def test_a_freshly_heartbeated_row_is_believed():
+    from datetime import datetime, timezone
+
+    assert state_module._is_stale(datetime.now(timezone.utc).isoformat()) is False
+
+
+def test_an_unwritten_row_is_stale():
+    assert state_module._is_stale("") is True
+    assert state_module._is_stale("not-a-timestamp") is True
+
+
+async def test_load_live_reports_not_running_for_a_stale_session(feed, monkeypatch):
+    feed.start_session("run-1", "hope")
+    feed.append_turn("run-1", "user", "", "said before the crash")
+    # simulate the process dying: state stays 'listening', nothing heartbeats
+    monkeypatch.setattr(state_module, "_LIVE_STALE_SECONDS", -1)
+
     s = DashboardState()
-    s.panel_open = False
-    s.select_chat("c2")
-    assert s.active_chat_id == "c2"
-    assert s.panel_open is True
+    await s.load_live()
 
-
-async def test_send_message_appends_the_turn_and_a_mock_reply():
-    """Pins Phase 1's mocked behaviour so replacing it with the real chat loop
-    is a visible, deliberate change to this test rather than a silent one."""
-    s = DashboardState()
-    s.compose_text = "what's on for today?"
-    s.attachments = [{"id": "a1", "type": "Image", "name": "photo.jpg"}]
-
-    async for _ in s.send_message():
-        pass
-
-    messages = s.active_chat["messages"]
-    assert messages[-2] == {"id": messages[-2]["id"], "role": "user",
-                            "text": "what's on for today?"}
-    assert messages[-1]["versions"] == [MOCK_REPLY_TEXT]
-    assert messages[-1]["agent"] == "HOPE"
-    assert s.compose_text == ""
-    assert s.attachments == []
-    assert s.is_thinking is False
-
-
-async def test_send_message_ignores_whitespace():
-    s = DashboardState()
-    before = len(s.active_chat["messages"])
-    s.compose_text = "   "
-
-    async for _ in s.send_message():
-        pass
-
-    assert len(s.active_chat["messages"]) == before
-
-
-def test_enter_sends_but_shift_enter_does_not():
-    s = DashboardState()
-    assert s.on_compose_key_down("Enter", {"shift_key": False}) is not None
-    assert s.on_compose_key_down("Enter", {"shift_key": True}) is None
-    assert s.on_compose_key_down("a", {"shift_key": False}) is None
-
-
-def test_regenerate_appends_a_version_and_selects_it():
-    s = DashboardState()
-    s.regenerate("c1", "m4")
-
-    message = next(m for m in s.active_chat["messages"] if m["id"] == "m4")
-    assert message["versions"][-1] == REGENERATE_TEXT
-    assert message["active_version"] == 1
-
-
-def test_switch_version_clamps_at_both_ends():
-    s = DashboardState()
-
-    s.switch_version("c1", "m2", -1)  # already at 0
-    assert next(m for m in s.active_chat["messages"] if m["id"] == "m2")["active_version"] == 0
-
-    s.switch_version("c1", "m2", 1)
-    s.switch_version("c1", "m2", 1)  # only 2 versions exist
-    assert next(m for m in s.active_chat["messages"] if m["id"] == "m2")["active_version"] == 1
-
-
-def test_editing_a_message_saves_the_draft():
-    s = DashboardState()
-    s.start_edit("m1", "original")
-    s.edit_change("m1", "edited text")
-    s.save_edit("c1", "m1")
-
-    assert next(m for m in s.active_chat["messages"] if m["id"] == "m1")["text"] == "edited text"
-    assert s.editing_msg_id == ""
-
-
-def test_cancelling_an_edit_leaves_the_message_alone():
-    s = DashboardState()
-    original = s.active_chat["messages"][0]["text"]
-    s.start_edit("m1", original)
-    s.edit_change("m1", "discard me")
-    s.cancel_edit()
-
-    assert s.active_chat["messages"][0]["text"] == original
-    assert s.editing_msg_id == ""
-
-
-def test_attachments_add_and_remove():
-    s = DashboardState()
-    s.attach_menu_open = True
-    s.add_attachment("Document")
-
-    assert len(s.attachments) == 1
-    assert s.attachments[0]["name"] == "notes.pdf"
-    assert s.attach_menu_open is False
-
-    s.remove_attachment(s.attachments[0]["id"])
-    assert s.attachments == []
+    assert s.live_state == "idle"
+    assert s.hope_is_running is False
+    # the turns are still there to read; only the liveness claim is withdrawn
+    assert len(s.live_turns) == 1

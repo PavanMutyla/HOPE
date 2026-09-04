@@ -26,9 +26,11 @@ from core.voice.context_meter import ContextMeter, resolve_context_limit
 from core.voice.kokoro_cache import ensure_kokoro_files, recover_corrupted_kokoro_cache
 from core.voice.summarizer import ContextSummarizer
 from core.voice.team_broadcast import TeamBroadcastObserver
+from core.voice.live_feed import LiveFeedObserver
 from core.voice.team_registry import team_registry
 from core.observability import LangfuseObserver, LangfuseTracer
 from core.status import StatusMonitor, StatusPanel
+from memory.live.store import LiveFeed
 from memory.board.store import Board
 from memory.coordination.store import Blackboard
 from memory.episodic_memory.store import EpisodicMemory
@@ -70,6 +72,7 @@ class VoicePipelineBundle:
     summarizer: ContextSummarizer
     blackboard: Blackboard
     board: Board
+    live_feed: LiveFeed
 
 
 def build_pipeline(agent: VoiceAgent, tools: list[FunctionSchema]) -> VoicePipelineBundle:
@@ -139,18 +142,26 @@ def build_pipeline(agent: VoiceAgent, tools: list[FunctionSchema]) -> VoicePipel
         ),
         threshold=settings.context_summarize_threshold,
     )
+    # One id per process run, shared by the summarizer (which tags every
+    # episode with it) and the live feed (which groups this run's turns under
+    # it) — so the dashboard's live view and the thread it later becomes in
+    # episodic memory carry the same identity.
+    session_id = str(uuid.uuid4())
     episodic_memory = EpisodicMemory()
     semantic_memory = SemanticMemory()
     procedural_memory = ProceduralMemory()
     blackboard = Blackboard(episodic_memory=episodic_memory)
     board = Board()
+    live_feed = LiveFeed()
+    live_feed.start_session(session_id, agent.name)
+    live_observer = LiveFeedObserver(live_feed, session_id, meter)
     summarizer = ContextSummarizer(
         context=context,
         meter=meter,
         panel=panel,
         client=AsyncOpenAI(api_key=settings.openai_api_key),
         episodic_memory=episodic_memory,
-        session_id=str(uuid.uuid4()),
+        session_id=session_id,
         semantic_memory=semantic_memory,
     )
 
@@ -163,6 +174,7 @@ def build_pipeline(agent: VoiceAgent, tools: list[FunctionSchema]) -> VoicePipel
         context_aggregator.user(),
         llm,
         post_monitor,
+        live_observer,
         post_trace,
         summarizer,
         tts,
@@ -190,5 +202,6 @@ def build_pipeline(agent: VoiceAgent, tools: list[FunctionSchema]) -> VoicePipel
         procedural_memory=procedural_memory,
         summarizer=summarizer,
         blackboard=blackboard,
+        live_feed=live_feed,
         board=board,
     )
