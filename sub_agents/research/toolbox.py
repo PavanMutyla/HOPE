@@ -8,6 +8,9 @@ Every page read is recorded as a source (blackboard research_sources) and
 its extracted text stored on disk, content-addressed, under
 research_dir/pages/ — so the report's citations can be checked later
 against exactly what the researcher saw.
+
+Every call is also logged, one line each, prefixed "[research] <name>" —
+hope.log, and so the dashboard's log card, shows the run as it happens.
 """
 
 import asyncio
@@ -61,6 +64,7 @@ class ResearchToolbox:
         agent_id: str,
         pages_dir: Path,
         read_url=fetch.read_url,
+        label: str | None = None,
     ) -> None:
         self._search = search_provider
         self._blackboard = blackboard
@@ -68,6 +72,7 @@ class ResearchToolbox:
         self._agent_id = agent_id
         self._pages_dir = pages_dir
         self._read_url = read_url
+        self._label = label or agent_id
         self.pages_read: list[tuple[str, str]] = []  # (title, url), for voice mode mid-run
 
     async def dispatch(self, name: str, arguments: str) -> str:
@@ -84,24 +89,35 @@ class ResearchToolbox:
     async def web_search(self, query: str) -> str:
         if not query.strip():
             return "Empty query."
+        logger.info(f'[research] {self._label} searching: "{query}"')
         try:
             results = await self._search.search(query, _SEARCH_LIMIT)
         except SearchError as exc:
+            logger.warning(f"[research] {self._label} search failed: {exc}")
             return str(exc)
+        logger.info(f"[research] {self._label} got {len(results)} results")
         if not results:
             return "No results."
         lines = [f"{i}. {r.title}\n   {r.url}\n   {r.snippet}" for i, r in enumerate(results, 1)]
         return as_untrusted(f"search: {query}", "\n".join(lines))
 
     async def read_url(self, url: str) -> str:
+        logger.info(f"[research] {self._label} reading: {url}")
         try:
             page = await self._read_url(url)
         except FetchBlocked as exc:
+            logger.warning(f"[research] {self._label} blocked: {exc}")
             return str(exc)
         except Exception as exc:  # network errors of every flavour — tell the agent, keep going
+            logger.warning(f"[research] {self._label} couldn't read {url}: {exc}")
             return f"Couldn't read {url}: {exc}"
         if not page.text.strip():
+            logger.info(f"[research] {self._label} read {url}: no readable text")
             return f"{url} had no readable text (it may need JavaScript)."
+        logger.info(
+            f'[research] {self._label} read "{page.title}" '
+            f"({len(page.text)} chars{', truncated' if page.truncated else ''})"
+        )
 
         await self._record(page.url, page.title, page.text)
         note = "\n[truncated — the page was longer]" if page.truncated else ""

@@ -64,7 +64,7 @@ class SubAgentManager:
     async def startup(self) -> None:
         stale = await asyncio.to_thread(self._blackboard.retire_live_agents)
         if stale:
-            logger.info(f"Retired {stale} sub-agent(s) left over from a previous run")
+            logger.info(f"[agents] Retired {stale} sub-agent(s) left over from a previous run")
 
     async def spawn(
         self,
@@ -107,7 +107,7 @@ class SubAgentManager:
         voice_agent.prompt_provider = lambda: prompt_for(live)
         self._registry.register(voice_agent)
         self._live[live.name] = live
-        logger.info(f"Spawned {spec.template} {live.spoken_name} ({voice.voice_id}): {spec.objective}")
+        logger.info(f"[agents] Spawned {spec.template} {live.spoken_name} ({voice.voice_id}): {spec.objective}")
         return live
 
     async def _evict_oldest_idle(self) -> None:
@@ -140,7 +140,7 @@ class SubAgentManager:
         self._registry.unregister(live.name)
         self._voice_pool.release(live.spoken_name)
         await self.set_status(live, "retired")
-        logger.info(f"Retired {live.spoken_name}")
+        logger.info(f"[agents] Retired {live.spoken_name}")
         return True
 
     async def retire_all(self) -> None:

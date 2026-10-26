@@ -90,8 +90,10 @@ def _research(tmp_path, stores, llm, max_live=5):
         url="https://voices.example/list", title="Voice list", text="54 voices.", truncated=False
     ))
 
-    def toolbox(search_provider, board, run_id, agent_id, pages_dir):
-        return ResearchToolbox(search_provider, board, run_id, agent_id, pages_dir, read_url=reader)
+    def toolbox(search_provider, board, run_id, agent_id, pages_dir, label=None):
+        return ResearchToolbox(
+            search_provider, board, run_id, agent_id, pages_dir, read_url=reader, label=label
+        )
 
     research = DeepResearch(
         manager, blackboard, episodic, search,
@@ -269,3 +271,57 @@ async def test_research_is_never_written_to_semantic_memory():
     import sub_agents.research.deep_research as module
 
     assert "semantic" not in inspect.getsource(module.DeepResearch).lower()
+
+
+@pytest.fixture
+def log_lines():
+    from loguru import logger
+
+    lines: list[str] = []
+    sink_id = logger.add(lambda message: lines.append(message.record["message"]), level="INFO")
+    yield lines
+    logger.remove(sink_id)
+
+
+@pytest.mark.integration
+async def test_every_step_is_logged_so_a_run_can_be_watched(tmp_path, stores, log_lines):
+    research, manager, _ = _research(tmp_path, stores, ScriptedLLM(_TWO))
+    await research.run("What voices does Kokoro have?", AsyncMock())
+
+    joined = "\n".join(log_lines)
+    assert '[research] Run run_' in joined and 'started: "What voices does Kokoro have?"' in joined
+    assert "[research] Planned 2 researcher(s)" in joined
+    for agent in manager.live():
+        name = agent.spoken_name
+        assert f"[agents] Spawned researcher {name}" in joined
+        assert f'[research] {name} searching: "{agent.spec.objective}"' in joined
+        assert f"[research] {name} reading: https://voices.example/list" in joined
+        assert f'[research] {name} read "Voice list"' in joined
+        assert f"[research] {name} finished — read 1 page(s)" in joined
+    assert "[research] Writing the report" in joined
+    assert "done — report saved to" in joined
+
+
+@pytest.mark.integration
+async def test_blocked_reads_and_failed_searches_are_logged(tmp_path, blackboard_only, log_lines):
+    from tools.web.fetch import FetchBlocked
+    from tools.web.search import SearchError
+
+    search = MagicMock()
+    search.search = AsyncMock(side_effect=SearchError("degoog isn't reachable"))
+    reader = AsyncMock(side_effect=FetchBlocked("localhost points at a local or private address"))
+    toolbox = ResearchToolbox(search, blackboard_only, "run_1", "agt_1", tmp_path, read_url=reader, label="Emma")
+
+    await toolbox.web_search("anything")
+    await toolbox.read_url("http://localhost:3000")
+
+    joined = "\n".join(log_lines)
+    assert "[research] Emma search failed: degoog isn't reachable" in joined
+    assert "[research] Emma blocked: localhost points at a local or private address" in joined
+
+
+@pytest.fixture
+def blackboard_only(tmp_path):
+    board = Blackboard(MagicMock(), db_path=tmp_path / "bb.db")
+    yield board
+    board.close()

@@ -83,7 +83,7 @@ class DeepResearch:
             message = await self._run(run_id, question)
             await self._resolve_plan(plan_id, run_id, question, message)
         except Exception as exc:
-            logger.exception(f"Research run failed: {exc}")
+            logger.exception(f"[research] Run failed: {exc}")
             if run_id is not None:
                 await self._mark_run(run_id, "failed")
             await self._abandon_plan(plan_id)
@@ -94,7 +94,9 @@ class DeepResearch:
 
     async def _run(self, run_id: str, question: str) -> str:
         run_dir = self._research_dir / run_id
+        logger.info(f'[research] Run {run_id} started: "{question}"')
         subtopics = await self._plan(question)
+        logger.info(f"[research] Planned {len(subtopics)} researcher(s)")
         await self._mark_run(run_id, "researching")
 
         researchers: list[LiveSubAgent] = []
@@ -113,7 +115,8 @@ class DeepResearch:
                 logger.warning(f"Running with {len(researchers)} researcher(s): {exc}")
                 break
             self._toolboxes[live.agent_id] = self._toolbox_factory(
-                self._search, self._blackboard, run_id, live.agent_id, self._research_dir / "pages"
+                self._search, self._blackboard, run_id, live.agent_id, self._research_dir / "pages",
+                label=live.spoken_name,
             )
             researchers.append(live)
         if not researchers:
@@ -128,9 +131,11 @@ class DeepResearch:
             raise RuntimeError("every researcher failed")
 
         await self._mark_run(run_id, "writing")
+        logger.info(f"[research] Writing the report from {len(finished)} researcher(s)' findings")
         report, spoken = await self._write(question, finished)
         report_path = run_dir / "report.md"
         await asyncio.to_thread(_write_text, report_path, f"# {question}\n\n{report}\n")
+        logger.info(f"[research] Run {run_id} done — report saved to {report_path}")
         await asyncio.to_thread(
             self._blackboard.update_run, run_id, "completed", str(report_path), spoken
         )
@@ -167,9 +172,12 @@ class DeepResearch:
         except asyncio.CancelledError:
             raise
         except Exception:
-            logger.exception(f"Researcher {live.spoken_name} failed")
+            logger.exception(f"[research] {live.spoken_name} failed")
             await self._manager.set_status(live, "failed")
             return
+        logger.info(
+            f"[research] {live.spoken_name} finished — read {len(toolbox.pages_read)} page(s)"
+        )
         live.findings = findings
         await asyncio.to_thread(
             _write_text, run_dir / f"{live.spoken_name.lower()}.md",
@@ -191,6 +199,7 @@ class DeepResearch:
         for _ in range(_MAX_LOOP_TURNS):
             out_of_budget = calls_left <= 0
             if out_of_budget:
+                logger.info(f"[research] {live.spoken_name} used its tool budget — writing findings")
                 messages.append({
                     "role": "user",
                     "content": "Tool budget used up. Write your findings now from what you've read.",
@@ -202,6 +211,7 @@ class DeepResearch:
             )
             choice = response.choices[0]
             if choice.finish_reason != "tool_calls" or not choice.message.tool_calls:
+                logger.info(f"[research] {live.spoken_name} is writing up findings")
                 return choice.message.content or "No findings."
 
             messages.append(choice.message)
