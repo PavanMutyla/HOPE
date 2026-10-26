@@ -6,8 +6,6 @@ from settings import Settings
 
 REQUIRED_KEYS = [
     "OPENAI_API_KEY",
-    "CARTESIA_API_KEY",
-    "CARTESIA_VOICE_ID",
     "USER_NAME",
     "LOG_LEVEL",
     "STT_MODEL",
@@ -17,7 +15,6 @@ REQUIRED_KEYS = [
     "LANGFUSE_BASE_URL",
     "ATLAS_LLM_MODEL",
     "ATLAS_WORKSPACE",
-    "ATLAS_VOICE_ID",
 ]
 
 
@@ -25,8 +22,6 @@ REQUIRED_KEYS = [
 def test_loads_with_all_required_keys(fake_env):
     s = Settings(_env_file=None)
     assert s.openai_api_key == "test-openai-key-not-real"
-    assert s.cartesia_api_key == "test-cartesia-key-not-real"
-    assert s.cartesia_voice_id == "test-cartesia-voice-id"
     assert s.user_name == "TestUser"
     assert s.log_level == "INFO"
     assert s.stt_model == "whisper-1"
@@ -37,7 +32,6 @@ def test_loads_with_all_required_keys(fake_env):
     assert s.langfuse_base_url == "https://cloud.langfuse.com"
     assert s.atlas_llm_model == "gpt-4o-mini"
     assert s.atlas_workspace == "/tmp/test-atlas-workspace"
-    assert s.atlas_voice_id == "test-atlas-voice-id"
     assert s.kokoro_voice_id == "af_heart"
     assert s.kokoro_atlas_voice_id == "af_bella"
 
@@ -45,20 +39,6 @@ def test_loads_with_all_required_keys(fake_env):
 @pytest.mark.unit
 def test_raises_on_missing_openai_api_key(fake_env, monkeypatch):
     monkeypatch.delenv("OPENAI_API_KEY")
-    with pytest.raises(ValidationError):
-        Settings(_env_file=None)
-
-
-@pytest.mark.unit
-def test_raises_on_missing_cartesia_api_key(fake_env, monkeypatch):
-    monkeypatch.delenv("CARTESIA_API_KEY")
-    with pytest.raises(ValidationError):
-        Settings(_env_file=None)
-
-
-@pytest.mark.unit
-def test_raises_on_missing_cartesia_voice_id(fake_env, monkeypatch):
-    monkeypatch.delenv("CARTESIA_VOICE_ID")
     with pytest.raises(ValidationError):
         Settings(_env_file=None)
 
@@ -129,13 +109,6 @@ def test_raises_on_missing_atlas_llm_model(fake_env, monkeypatch):
 @pytest.mark.unit
 def test_raises_on_missing_atlas_workspace(fake_env, monkeypatch):
     monkeypatch.delenv("ATLAS_WORKSPACE")
-    with pytest.raises(ValidationError):
-        Settings(_env_file=None)
-
-
-@pytest.mark.unit
-def test_raises_on_missing_atlas_voice_id(fake_env, monkeypatch):
-    monkeypatch.delenv("ATLAS_VOICE_ID")
     with pytest.raises(ValidationError):
         Settings(_env_file=None)
 
@@ -287,9 +260,12 @@ def test_procedures_dir_default(fake_env):
 
 
 @pytest.mark.unit
-def test_blackboard_db_path_default(fake_env):
+def test_blackboard_db_path_default(fake_env, monkeypatch):
+    # conftest points this at a temp dir so tests can't touch real data;
+    # the default under test is only visible with that override removed.
     from pathlib import Path
     from settings import Settings
+    monkeypatch.delenv("BLACKBOARD_DB_PATH", raising=False)
     s = Settings(_env_file=None)
     assert Path(s.blackboard_db_path).parts[-3:] == ("data_store", "coordination", "blackboard.db")
     assert Path(s.blackboard_db_path).is_absolute()
@@ -399,3 +375,63 @@ def test_live_db_path_defaults_under_data_store_and_is_absolute(fake_env, monkey
     s = Settings(_env_file=None)
     assert Path(s.live_db_path).parts[-3:] == ("data_store", "live", "live.db")
     assert Path(s.live_db_path).is_absolute()
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("key", ["CARTESIA_API_KEY", "CARTESIA_VOICE_ID", "ATLAS_VOICE_ID"])
+def test_retired_voice_keys_are_not_required(fake_env, monkeypatch, key):
+    # TTS is Kokoro; these were required but never read, which forced every
+    # new install to invent fake Cartesia credentials.
+    monkeypatch.delenv(key, raising=False)
+    Settings(_env_file=None)  # loads without it
+    assert key.lower() not in Settings.model_fields
+
+
+@pytest.mark.unit
+def test_search_provider_defaults_to_degoog(fake_env):
+    assert Settings(_env_file=None).search_provider == "degoog"
+
+
+@pytest.mark.unit
+def test_degoog_url_defaults_to_local_instance(fake_env):
+    assert Settings(_env_file=None).degoog_url == "http://localhost:4444"
+
+
+@pytest.mark.unit
+def test_degoog_api_key_defaults_to_empty(fake_env):
+    assert Settings(_env_file=None).degoog_api_key == ""
+
+
+@pytest.mark.unit
+def test_searxng_url_defaults_to_local_instance(fake_env):
+    assert Settings(_env_file=None).searxng_url == "http://localhost:8888"
+
+
+@pytest.mark.unit
+def test_max_live_subagents_default(fake_env):
+    assert Settings(_env_file=None).max_live_subagents == 5
+
+
+@pytest.mark.unit
+def test_research_llm_model_default(fake_env):
+    assert Settings(_env_file=None).research_llm_model == "gpt-4o-mini"
+
+
+@pytest.mark.unit
+def test_research_max_researchers_default(fake_env):
+    assert Settings(_env_file=None).research_max_researchers == 4
+
+
+@pytest.mark.unit
+def test_research_max_tool_calls_default(fake_env):
+    assert Settings(_env_file=None).research_max_tool_calls == 12
+
+
+@pytest.mark.unit
+def test_research_dir_default(fake_env, monkeypatch):
+    from pathlib import Path
+
+    monkeypatch.delenv("RESEARCH_DIR", raising=False)
+    s = Settings(_env_file=None)
+    assert Path(s.research_dir).parts[-2:] == ("data_store", "research")
+    assert Path(s.research_dir).is_absolute()

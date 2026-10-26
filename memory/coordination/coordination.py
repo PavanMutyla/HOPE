@@ -10,7 +10,7 @@ from pathlib import Path
 
 from ulid import ULID
 
-from memory.coordination.schema import Signal, Task
+from memory.coordination.schema import ResearchRun, ResearchSource, Signal, SubAgentRecord, Task
 
 _MIGRATIONS_DIR = Path(__file__).parent / "migrations"
 
@@ -23,7 +23,8 @@ def _apply_migrations(conn: sqlite3.Connection) -> None:
     """Runs every .sql file under migrations/ in order. Each migration's
     statements are idempotent (CREATE TABLE IF NOT EXISTS), so replaying all
     of them on an already-migrated database is always safe — no separate
-    applied-migrations tracking table needed while there's a single file."""
+    applied-migrations tracking table needed while every file stays
+    additive-only (CREATE ... IF NOT EXISTS, never ALTER)."""
     for migration in sorted(_MIGRATIONS_DIR.glob("*.sql")):
         conn.executescript(migration.read_text())
 
@@ -176,3 +177,144 @@ def get_signals_for(conn: sqlite3.Connection, agent_name: str) -> list[Signal]:
                 [(ts, signal.id) for signal in signals],
             )
     return signals
+
+
+# ── Sub-agents ────────────────────────────────────────────────────────────────
+
+
+def register_agent(
+    conn: sqlite3.Connection,
+    spoken_name: str,
+    template: str,
+    voice_id: str,
+    objective: str,
+    run_id: str | None = None,
+) -> str:
+    agent_id = f"agt_{ULID()}"
+    ts = _now_iso()
+    with conn:
+        conn.execute(
+            "INSERT INTO agents (agent_id, spoken_name, template, voice_id, status, objective, "
+            "run_id, created_at, updated_at, retired_at) "
+            "VALUES (?, ?, ?, ?, 'working', ?, ?, ?, ?, NULL)",
+            (agent_id, spoken_name, template, voice_id, objective, run_id, ts, ts),
+        )
+    return agent_id
+
+
+def set_agent_status(conn: sqlite3.Connection, agent_id: str, status: str) -> bool:
+    ts = _now_iso()
+    retired_at = ts if status == "retired" else None
+    with conn:
+        cur = conn.execute(
+            "UPDATE agents SET status = ?, updated_at = ?, retired_at = COALESCE(?, retired_at) "
+            "WHERE agent_id = ?",
+            (status, ts, retired_at, agent_id),
+        )
+    return cur.rowcount == 1
+
+
+def retire_live_agents(conn: sqlite3.Connection) -> int:
+    """Retire every agent not already retired. Run at startup: sub-agents are
+    disposable per hope.py process, so any live row at that point belongs to
+    a process that was killed before it could retire its own."""
+    ts = _now_iso()
+    with conn:
+        cur = conn.execute(
+            "UPDATE agents SET status = 'retired', updated_at = ?, retired_at = ? "
+            "WHERE status != 'retired'",
+            (ts, ts),
+        )
+    return cur.rowcount
+
+
+def _row_to_agent(row: sqlite3.Row) -> SubAgentRecord:
+    return SubAgentRecord(**{key: row[key] for key in row.keys()})
+
+
+def get_agent(conn: sqlite3.Connection, agent_id: str) -> SubAgentRecord | None:
+    row = conn.execute("SELECT * FROM agents WHERE agent_id = ?", (agent_id,)).fetchone()
+    return _row_to_agent(row) if row else None
+
+
+def list_agents(conn: sqlite3.Connection, include_retired: bool = False) -> list[SubAgentRecord]:
+    query = "SELECT * FROM agents"
+    if not include_retired:
+        query += " WHERE status != 'retired'"
+    query += " ORDER BY created_at"
+    return [_row_to_agent(row) for row in conn.execute(query).fetchall()]
+
+
+# ── Research runs ─────────────────────────────────────────────────────────────
+
+
+def create_run(conn: sqlite3.Connection, question: str) -> str:
+    run_id = f"run_{ULID()}"
+    ts = _now_iso()
+    with conn:
+        conn.execute(
+            "INSERT INTO research_runs (run_id, question, status, report_path, summary, "
+            "created_at, updated_at) VALUES (?, ?, 'planning', NULL, NULL, ?, ?)",
+            (run_id, question, ts, ts),
+        )
+    return run_id
+
+
+def update_run(
+    conn: sqlite3.Connection,
+    run_id: str,
+    status: str,
+    report_path: str | None = None,
+    summary: str | None = None,
+) -> bool:
+    """report_path/summary only overwrite when given, so a status-only update
+    never blanks a report that was already written."""
+    with conn:
+        cur = conn.execute(
+            "UPDATE research_runs SET status = ?, report_path = COALESCE(?, report_path), "
+            "summary = COALESCE(?, summary), updated_at = ? WHERE run_id = ?",
+            (status, report_path, summary, _now_iso(), run_id),
+        )
+    return cur.rowcount == 1
+
+
+def _row_to_run(row: sqlite3.Row) -> ResearchRun:
+    return ResearchRun(**{key: row[key] for key in row.keys()})
+
+
+def get_run(conn: sqlite3.Connection, run_id: str) -> ResearchRun | None:
+    row = conn.execute("SELECT * FROM research_runs WHERE run_id = ?", (run_id,)).fetchone()
+    return _row_to_run(row) if row else None
+
+
+def list_runs(conn: sqlite3.Connection, limit: int = 5) -> list[ResearchRun]:
+    rows = conn.execute(
+        "SELECT * FROM research_runs ORDER BY created_at DESC LIMIT ?", (limit,)
+    ).fetchall()
+    return [_row_to_run(row) for row in rows]
+
+
+def add_source(
+    conn: sqlite3.Connection,
+    run_id: str,
+    agent_id: str,
+    url: str,
+    title: str,
+    content_hash: str,
+) -> bool:
+    """False when this agent already recorded this URL in this run — a
+    researcher re-reading a page is normal and isn't a new source."""
+    with conn:
+        cur = conn.execute(
+            "INSERT OR IGNORE INTO research_sources (run_id, agent_id, url, title, content_hash, "
+            "fetched_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (run_id, agent_id, url, title, content_hash, _now_iso()),
+        )
+    return cur.rowcount == 1
+
+
+def list_sources(conn: sqlite3.Connection, run_id: str) -> list[ResearchSource]:
+    rows = conn.execute(
+        "SELECT * FROM research_sources WHERE run_id = ? ORDER BY id", (run_id,)
+    ).fetchall()
+    return [ResearchSource(**{key: row[key] for key in row.keys()}) for row in rows]

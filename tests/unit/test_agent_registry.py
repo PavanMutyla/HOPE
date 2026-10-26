@@ -123,3 +123,60 @@ async def test_switch_to_unknown_agent_raises(agent_registry):
 
     with pytest.raises(KeyError):
         await agent_registry.switch("nonexistent", context, llm)
+
+
+@pytest.mark.unit
+def test_unregister_removes_agent(agent_registry):
+    agent_registry.unregister("atlas")
+    with pytest.raises(KeyError):
+        agent_registry.get("atlas")
+
+
+@pytest.mark.unit
+def test_unregister_unknown_agent_is_a_no_op(agent_registry):
+    agent_registry.unregister("nobody")
+    assert len(agent_registry.all()) == 2
+
+
+@pytest.mark.unit
+def test_find_matches_spoken_name_case_insensitively(agent_registry):
+    from core.voice.agent import VoiceAgent
+
+    emma = VoiceAgent(name="emma", system_prompt="", voice_id="bf_emma", spoken_name="Emma")
+    agent_registry.register(emma)
+    assert agent_registry.find("Emma") is emma
+    assert agent_registry.find("  EMMA ") is emma
+
+
+@pytest.mark.unit
+def test_find_matches_registry_name(agent_registry, atlas_voice_agent):
+    assert agent_registry.find("Atlas") is atlas_voice_agent
+
+
+@pytest.mark.unit
+def test_find_unknown_returns_none(agent_registry):
+    assert agent_registry.find("nobody") is None
+
+
+@pytest.mark.unit
+def test_current_prompt_defaults_to_system_prompt(atlas_voice_agent):
+    assert atlas_voice_agent.current_prompt() == "You are Atlas."
+
+
+@pytest.mark.unit
+async def test_switch_uses_prompt_provider_at_switch_time(agent_registry):
+    from core.voice.agent import VoiceAgent
+
+    state = {"findings": "nothing yet"}
+    emma = VoiceAgent(
+        name="emma", system_prompt="", voice_id="bf_emma", spoken_name="Emma",
+        prompt_provider=lambda: f"Findings: {state['findings']}",
+    )
+    agent_registry.register(emma)
+    state["findings"] = "54 voices"  # changes after registration
+
+    context = MagicMock()
+    context.messages = [{"role": "system", "content": "You are HOPE."}]
+    await agent_registry.switch("emma", context, AsyncMock())
+
+    assert context.set_messages.call_args[0][0][0]["content"] == "Findings: 54 voices"

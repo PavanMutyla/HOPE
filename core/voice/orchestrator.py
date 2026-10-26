@@ -2,7 +2,7 @@ import asyncio
 
 from openai import AsyncOpenAI
 
-from core.voice.agent import AgentRegistry
+from core.voice.agent import AgentRegistry, VoiceAgent
 from core.voice.pipeline import VoicePipelineBundle
 from settings import settings
 
@@ -13,6 +13,9 @@ class VoiceOrchestrator:
         self.bundle = bundle
         self._client = AsyncOpenAI(api_key=settings.openai_api_key)
 
+    def find_agent(self, name: str) -> VoiceAgent | None:
+        return self._registry.find(name)
+
     async def switch_to(self, name: str) -> None:
         await self._registry.switch(name, self.bundle.context, self.bundle.llm)
         self.bundle.panel.set_agent(name)
@@ -22,7 +25,7 @@ class VoiceOrchestrator:
         response = await self._client.chat.completions.create(
             model=settings.llm_model,
             messages=[
-                {"role": "system", "content": agent.system_prompt},
+                {"role": "system", "content": agent.current_prompt()},
                 {"role": "user", "content": f"[from {from_agent}]: {message}"},
             ],
         )

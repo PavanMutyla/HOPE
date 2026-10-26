@@ -11,14 +11,18 @@ from pipecat.workers.runner import WorkerRunner
 
 from sub_agents.atlas.agent import atlas_agent
 from sub_agents.atlas.team import build_atlas_team_member
+from sub_agents.research.deep_research import DeepResearch
+from core.agents.manager import SubAgentManager
 from core.voice.agent import AgentRegistry, VoiceAgent
 from core.voice.orchestrator import VoiceOrchestrator
 from core.voice.pipeline import build_pipeline
 from core.voice.summarizer import inject_warm_start, upgrade_pending_episodes
 from core.voice.team_registry import team_registry
+from core.voice.voice_pool import VoicePool
 from core.prompt import SYSTEM_PROMPT
 from settings import settings
 from tools.registry import ALL_SCHEMAS, setup as setup_tools
+from tools.web.search import build_search_provider
 
 _REPO_ROOT = Path(__file__).parent
 _DASHBOARD_DIR = _REPO_ROOT / "dashboard"
@@ -112,7 +116,18 @@ async def main():
         bundle = build_pipeline(hope_agent, ALL_SCHEMAS)
         orchestrator = VoiceOrchestrator(registry, bundle)
 
-        setup_tools(orchestrator)
+        # HOPE's and Atlas's voices are never handed to a spawned sub-agent.
+        voice_pool = VoicePool(reserved={settings.kokoro_voice_id, settings.kokoro_atlas_voice_id})
+        subagents = SubAgentManager(
+            registry, bundle.blackboard, voice_pool, settings.max_live_subagents
+        )
+        await subagents.startup()
+        search_provider = build_search_provider()
+        research = DeepResearch(
+            subagents, bundle.blackboard, bundle.episodic_memory, search_provider
+        )
+
+        setup_tools(orchestrator, subagents, research, search_provider)
 
         await inject_warm_start(bundle.episodic_memory, bundle.context)
 
@@ -142,6 +157,8 @@ async def main():
             bundle.panel.stop()
             bundle.tracer.shutdown()
             await bundle.summarizer.flush()
+            # Before the blackboard closes — retiring writes each agent's row.
+            await subagents.retire_all()
             bundle.episodic_memory.close()
             bundle.blackboard.close()
             bundle.board.close()

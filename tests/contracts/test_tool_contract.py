@@ -122,3 +122,40 @@ def test_safe_path_allows_valid_relative_path():
     workspace = Path("/tmp/test-workspace")
     result = _safe_path(workspace, "subdir/file.txt")
     assert str(result).startswith(str(workspace.resolve()))
+
+
+# ─── Researcher tool contract ────────────────────────────────────
+# Researchers get their own tool table (sub_agents/research/toolbox.py), and
+# that table is the read-only guarantee — so it's pinned here exactly.
+
+@pytest.mark.contract
+def test_research_schemas_are_exactly_web_search_and_read_url():
+    from sub_agents.research.toolbox import TOOL_SCHEMAS as RESEARCH_SCHEMAS
+
+    assert {s["function"]["name"] for s in RESEARCH_SCHEMAS} == {"web_search", "read_url"}
+
+
+@pytest.mark.contract
+def test_research_schemas_are_well_formed():
+    from sub_agents.research.toolbox import TOOL_SCHEMAS as RESEARCH_SCHEMAS
+
+    for schema in RESEARCH_SCHEMAS:
+        assert schema["type"] == "function"
+        assert schema["function"]["description"]
+        assert schema["function"]["parameters"]["type"] == "object"
+        assert schema["function"]["parameters"]["required"]
+
+
+@pytest.mark.contract
+def test_research_schemas_match_the_researcher_template_allowlist():
+    from core.agents.spec import TEMPLATE_TOOLS
+    from sub_agents.research.toolbox import TOOL_SCHEMAS as RESEARCH_SCHEMAS
+
+    assert {s["function"]["name"] for s in RESEARCH_SCHEMAS} == TEMPLATE_TOOLS["researcher"]
+
+
+@pytest.mark.contract
+def test_no_atlas_tool_is_reachable_from_the_research_toolbox():
+    from sub_agents.research.toolbox import TOOL_SCHEMAS as RESEARCH_SCHEMAS
+
+    assert not ({s["function"]["name"] for s in RESEARCH_SCHEMAS} & ATLAS_TOOL_NAMES)

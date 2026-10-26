@@ -8,6 +8,5 @@ dist/
 *.egg-info/
 .pytest_cache/
 
-.env.example
 .claude/settings.local.json
 data_store/
