@@ -27,6 +27,7 @@ from core.voice.kokoro_cache import ensure_kokoro_files, recover_corrupted_kokor
 from core.voice.summarizer import ContextSummarizer
 from core.voice.team_broadcast import TeamBroadcastObserver
 from core.voice.live_feed import LiveFeedObserver, LiveUserTap
+from core.voice.transcript_filter import PromptEchoFilter
 from core.voice.team_registry import team_registry
 from core.observability import LangfuseObserver, LangfuseTracer
 from core.status import StatusMonitor, StatusPanel
@@ -37,6 +38,10 @@ from memory.episodic_memory.store import EpisodicMemory
 from memory.procedural_memory.store import ProceduralMemory
 from memory.semantic_memory.store import SemanticMemory
 from settings import settings
+
+# Biases transcription toward the right names and topics. The model sometimes
+# returns this text itself on silence; PromptEchoFilter drops those.
+STT_PROMPT = "Pavan is speaking. Conversation about business, tech, and personal topics."
 
 
 def _build_kokoro_tts(voice_id: str) -> KokoroTTSService:
@@ -90,7 +95,7 @@ def build_pipeline(agent: VoiceAgent, tools: list[FunctionSchema]) -> VoicePipel
         settings=OpenAISTTService.Settings(
             model=settings.stt_model,
             language="en",
-            prompt="Pavan is speaking. Conversation about business, tech, and personal topics.",
+            prompt=STT_PROMPT,
         ),
     )
 
@@ -171,6 +176,7 @@ def build_pipeline(agent: VoiceAgent, tools: list[FunctionSchema]) -> VoicePipel
     pipeline = Pipeline([
         transport.input(),
         stt,
+        PromptEchoFilter(STT_PROMPT),  # before anything reads a transcript
         team_broadcast,
         pre_monitor,
         pre_trace,

@@ -170,3 +170,15 @@ def test_live_user_tap_sits_before_the_user_aggregator(pipeline_mocks, hope_voic
     tap = next(i for i, p in enumerate(processors) if isinstance(p, LiveUserTap))
     aggregator = next(i for i, p in enumerate(processors) if isinstance(p, LLMUserAggregator))
     assert tap < aggregator
+
+
+@pytest.mark.integration
+def test_prompt_echo_filter_sits_right_after_stt(pipeline_mocks, hope_voice_agent):
+    """Anything between STT and the filter would still see the phantom turn."""
+    from core.voice.pipeline import build_pipeline
+    from core.voice.transcript_filter import PromptEchoFilter
+
+    build_pipeline(hope_voice_agent, [])
+    processors = pipeline_mocks["Pipeline"].call_args[0][0]
+    stt = processors.index(pipeline_mocks["OpenAISTTService"].return_value)
+    assert isinstance(processors[stt + 1], PromptEchoFilter)
