@@ -30,3 +30,42 @@ class Signal(BaseModel):
     payload: str
     created_at: str
     read_at: str | None = None
+
+
+class SubAgentRecord(BaseModel):
+    model_config = ConfigDict(strict=True, frozen=True)
+
+    agent_id: str
+    spoken_name: str
+    template: str
+    voice_id: str
+    status: str  # 'working' | 'idle' | 'failed' | 'retired'
+    objective: str
+    run_id: str | None = None
+    created_at: str
+    updated_at: str
+    retired_at: str | None = None
+
+
+class ResearchRun(BaseModel):
+    model_config = ConfigDict(strict=True, frozen=True)
+
+    run_id: str
+    question: str
+    status: str  # 'planning' | 'researching' | 'writing' | 'completed' | 'failed'
+    report_path: str | None = None
+    summary: str | None = None
+    created_at: str
+    updated_at: str
+
+
+class ResearchSource(BaseModel):
+    model_config = ConfigDict(strict=True, frozen=True)
+
+    id: int
+    run_id: str
+    agent_id: str
+    url: str
+    title: str
+    content_hash: str
+    fetched_at: str
