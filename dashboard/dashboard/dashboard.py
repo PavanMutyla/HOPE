@@ -12,7 +12,7 @@ from dashboard.components.console import console
 from dashboard.components.corkboard import corkboard
 from dashboard.components.primitives import pointer_div
 from dashboard.components.sidebar import sidebar
-from dashboard.components.terminal_panel import terminal_panel
+from dashboard.components.terminal_panel import terminal_panel, tools_panel, web_panel
 from dashboard.state import DashboardState
 
 _BASE_CSS = """
@@ -43,40 +43,36 @@ body.dragging, body.dragging * { user-select: none !important; }
 """
 
 
+def _reopen_button(label: str, hidden: rx.Var[bool], on_click) -> rx.Component:
+    return rx.cond(
+        hidden,
+        rx.el.button(
+            label,
+            on_click=on_click,
+            style={
+                "fontSize": s.SIZE_MICRO, "fontFamily": s.FONT_MONO,
+                "padding": "7px 12px", "borderRadius": s.RADIUS,
+                "border": f"1px solid {s.BORDER_STRONG}",
+                "background": s.PANEL_BG, "color": s.TEXT_DIM, "cursor": "pointer",
+                "_hover": {"color": s.TEXT, "borderColor": s.ACCENT},
+                "_focusVisible": s.FOCUS_RING,
+            },
+        ),
+    )
+
+
 def _reopen_bar() -> rx.Component:
     """Closing a panel has to be undoable. The prototype's close buttons were
     one-way: nothing brought the panel back short of reloading the page."""
     return rx.el.div(
-        rx.cond(
-            ~DashboardState.console_open,
-            rx.el.button(
-                "Show conversation",
-                on_click=DashboardState.open_console,
-                style={
-                    "fontSize": s.SIZE_MICRO, "fontFamily": s.FONT_MONO,
-                    "padding": "7px 12px", "borderRadius": s.RADIUS,
-                    "border": f"1px solid {s.BORDER_STRONG}",
-                    "background": s.PANEL_BG, "color": s.TEXT_DIM, "cursor": "pointer",
-                    "_hover": {"color": s.TEXT, "borderColor": s.ACCENT},
-                    "_focusVisible": s.FOCUS_RING,
-                },
-            ),
+        _reopen_button(
+            "Show conversation", ~DashboardState.console_open, DashboardState.open_console
         ),
-        rx.cond(
-            ~DashboardState.terminal_open,
-            rx.el.button(
-                "Show log",
-                on_click=DashboardState.open_terminal,
-                style={
-                    "fontSize": s.SIZE_MICRO, "fontFamily": s.FONT_MONO,
-                    "padding": "7px 12px", "borderRadius": s.RADIUS,
-                    "border": f"1px solid {s.BORDER_STRONG}",
-                    "background": s.PANEL_BG, "color": s.TEXT_DIM, "cursor": "pointer",
-                    "_hover": {"color": s.TEXT, "borderColor": s.ACCENT},
-                    "_focusVisible": s.FOCUS_RING,
-                },
-            ),
+        _reopen_button("Show log", ~DashboardState.log_open["log"], DashboardState.open_log("log")),
+        _reopen_button(
+            "Show tools", ~DashboardState.log_open["tools"], DashboardState.open_log("tools")
         ),
+        _reopen_button("Show web", ~DashboardState.log_open["web"], DashboardState.open_log("web")),
         style={
             "position": "absolute", "right": "16px", "bottom": "16px",
             "display": "flex", "gap": "8px", "zIndex": 40,
@@ -104,6 +100,8 @@ def index() -> rx.Component:
             corkboard(),
             console(),
             terminal_panel(),
+            tools_panel(),
+            web_panel(),
             id="board",
             style={"position": "absolute", "inset": 0},
         ),

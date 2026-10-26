@@ -2,6 +2,7 @@ import asyncio
 import os
 import signal
 import subprocess
+import webbrowser
 from pathlib import Path
 
 from loguru import logger
@@ -22,13 +23,14 @@ from core.voice.voice_pool import VoicePool
 from core.prompt import SYSTEM_PROMPT
 from settings import settings
 from tools.registry import ALL_SCHEMAS, setup as setup_tools
-from tools.web.degoog_service import DegoogService
+from tools.web.degoog_service import DegoogService, is_listening
 from tools.web.search import build_search_provider
 
 _REPO_ROOT = Path(__file__).parent
 _DASHBOARD_DIR = _REPO_ROOT / "dashboard"
 _REFLEX_BIN = _REPO_ROOT / ".venv" / "bin" / "reflex"
 _DASHBOARD_PORT = 3000
+_DASHBOARD_OPEN_TIMEOUT = 180  # seconds; the very first Reflex compile is the slow one
 
 
 hope_agent = VoiceAgent(
@@ -60,6 +62,24 @@ def _start_dashboard() -> subprocess.Popen | None:
     logger.debug(f"Dashboard subprocess started (pid {proc.pid}).")
     print(f"Dashboard: http://localhost:{_DASHBOARD_PORT} (watch below for the actual port if that one's taken)")
     return proc
+
+
+async def _open_dashboard_when_ready(proc: subprocess.Popen | None) -> None:
+    """`reflex run` never opens a browser itself. Its first compile takes a
+    while, so this waits for the port to answer rather than opening a tab
+    onto a connection error."""
+    if proc is None or not settings.dashboard_open_browser:
+        return
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + _DASHBOARD_OPEN_TIMEOUT
+    while proc.poll() is None and loop.time() < deadline:
+        if await asyncio.to_thread(is_listening, _DASHBOARD_PORT):
+            url = f"http://localhost:{_DASHBOARD_PORT}"
+            await asyncio.to_thread(webbrowser.open, url)
+            logger.info(f"Opened the dashboard at {url}")
+            return
+        await asyncio.sleep(1)
+    logger.warning(f"Dashboard didn't answer on :{_DASHBOARD_PORT} — open it by hand")
 
 
 def _stop_dashboard(proc: subprocess.Popen | None) -> None:
@@ -117,6 +137,7 @@ async def main():
 
     dashboard_proc = _start_dashboard()
     degoog = _build_degoog()
+    asyncio.create_task(_open_dashboard_when_ready(dashboard_proc))
     try:
         if degoog is not None:
             await asyncio.to_thread(degoog.start)

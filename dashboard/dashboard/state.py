@@ -16,6 +16,7 @@ already happened.
 import dashboard._pathfix  # noqa: F401 — sys.path side effect, must run first
 
 import asyncio
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -42,6 +43,15 @@ _SESSION_REFRESH_SECONDS = 30
 # long enough to ride out a slow fold or a GC pause.
 _LIVE_STALE_SECONDS = 30
 _LOG_TAIL_LINES = 200
+
+# The Tools and Web cards are filters over the same hope.log the Log card
+# tails, keyed on the tags hope.py's code writes: "[tool]" from
+# tools/registry.py and Atlas, and the internet tags from deep research, the
+# sub-agent manager, HOPE's own search/read tools and the degoog service.
+_TOOL_TAGS = ("[tool] ",)
+_WEB_TAGS = ("[research] ", "[agents] ", "[web] ", "[degoog] ")
+# Loguru's default line: "2026-10-26 23:55:28.835 | INFO     | module:fn:12 - message".
+_LOGURU_LINE = re.compile(r"^\d{4}-\d\d-\d\d (\d\d:\d\d:\d\d)\.\d+ \| (\w+)\s*\| \S+ - (.*)$")
 
 # The marker ContextSummarizer.flush() writes for a session archived raw at
 # shutdown and not yet re-summarized. Showing it verbatim leaks an internal
@@ -102,6 +112,30 @@ def _day_label(iso_ts: str) -> str:
     return then.strftime("%-d %b, %-I:%M %p")
 
 
+def _activity_rows(lines: list[str], tags: tuple[str, ...]) -> list[dict]:
+    """Lines carrying one of `tags`, reduced to a time and a readable message.
+    The tag itself is dropped since the card names it, except degoog's, which
+    would otherwise read as an unattributed "Ready on 127.0.0.1:4444"."""
+    rows = []
+    for line in lines:
+        match = _LOGURU_LINE.match(line)
+        if not match:
+            continue
+        time, level, message = match.groups()
+        tag = next((t for t in tags if message.startswith(t)), None)
+        if tag is None:
+            continue
+        text = message[len(tag):]
+        if tag == "[degoog] ":
+            text = f"degoog: {text}"
+        rows.append({
+            "time": time,
+            "text": text,
+            "warn": "1" if level in ("WARNING", "ERROR", "CRITICAL") else "",
+        })
+    return rows[-_LOG_TAIL_LINES:]
+
+
 def _headline(summary: str) -> str:
     """First sentence of the session summary, used as the thread's name.
 
@@ -140,11 +174,15 @@ class DashboardState(rx.State):
     notes: list[dict] = NOTE_LAYOUT
     new_task_drafts: dict[str, str] = {"n3": "", "n4": "", "n5": ""}
 
-    # ── terminal ────────────────────────────────────────────────
-    terminal_open: bool = True
-    terminal_x: int = 300
-    terminal_y: int = 670
+    # ── log cards ───────────────────────────────────────────────
+    # Three views of hope.log: everything, tool calls, web activity. Keyed so
+    # they share one set of open/close and drag handlers.
+    log_open: dict[str, bool] = {"log": True, "tools": True, "web": True}
+    log_x: dict[str, int] = {"log": 300, "tools": 1390, "web": 1390}
+    log_y: dict[str, int] = {"log": 670, "tools": 40, "web": 364}
     terminal_lines: list[str] = []
+    tool_rows: list[dict[str, str]] = []
+    web_rows: list[dict[str, str]] = []
 
     # ── drag tracking (one thing at a time) ─────────────────────
     dragging_note_id: str = ""
@@ -153,9 +191,9 @@ class DashboardState(rx.State):
     dragging_console: bool = False
     _console_drag_start: tuple[int, int] = (0, 0)
     _console_drag_orig: tuple[int, int] = (0, 0)
-    dragging_terminal: bool = False
-    _terminal_drag_start: tuple[int, int] = (0, 0)
-    _terminal_drag_orig: tuple[int, int] = (0, 0)
+    dragging_log: str = ""
+    _log_drag_start: tuple[int, int] = (0, 0)
+    _log_drag_orig: tuple[int, int] = (0, 0)
 
     # ── computed ────────────────────────────────────────────────
 
@@ -164,7 +202,7 @@ class DashboardState(rx.State):
         """Text selection fights a pointer drag: without this, dragging a note
         paints a selection across the whole board. Scoped to the drag so text
         stays selectable the rest of the time."""
-        return bool(self.dragging_note_id) or self.dragging_console or self.dragging_terminal
+        return bool(self.dragging_note_id) or self.dragging_console or bool(self.dragging_log)
 
     @rx.var
     def is_live_selected(self) -> bool:
@@ -388,8 +426,10 @@ class DashboardState(rx.State):
         if not path.exists():
             self.terminal_lines = ["No log yet. Start hope.py to see activity here."]
             return
-        text = await asyncio.to_thread(path.read_text)
-        self.terminal_lines = text.splitlines()[-_LOG_TAIL_LINES:]
+        lines = (await asyncio.to_thread(path.read_text)).splitlines()
+        self.terminal_lines = lines[-_LOG_TAIL_LINES:]
+        self.tool_rows = _activity_rows(lines, _TOOL_TAGS)
+        self.web_rows = _activity_rows(lines, _WEB_TAGS)
 
     @rx.event
     async def on_page_load(self):
@@ -468,15 +508,15 @@ class DashboardState(rx.State):
         await asyncio.to_thread(_board.update_quick_note, value, settings.user_name)
         await self.load_board()
 
-    # ── terminal ────────────────────────────────────────────────
+    # ── log cards ───────────────────────────────────────────────
 
     @rx.event
-    def close_terminal(self):
-        self.terminal_open = False
+    def close_log(self, card: str):
+        self.log_open = {**self.log_open, card: False}
 
     @rx.event
-    def open_terminal(self):
-        self.terminal_open = True
+    def open_log(self, card: str):
+        self.log_open = {**self.log_open, card: True}
 
     # ── dragging ────────────────────────────────────────────────
 
@@ -494,10 +534,10 @@ class DashboardState(rx.State):
         self._console_drag_orig = (self.console_x, self.console_y)
 
     @rx.event
-    def start_terminal_drag(self, info: dict):
-        self.dragging_terminal = True
-        self._terminal_drag_start = (info["client_x"], info["client_y"])
-        self._terminal_drag_orig = (self.terminal_x, self.terminal_y)
+    def start_log_drag(self, card: str, info: dict):
+        self.dragging_log = card
+        self._log_drag_start = (info["client_x"], info["client_y"])
+        self._log_drag_orig = (self.log_x[card], self.log_y[card])
 
     @rx.event(throttle=16)
     def on_root_mouse_move(self, info: dict):
@@ -514,14 +554,15 @@ class DashboardState(rx.State):
             ox, oy = self._console_drag_orig
             self.console_x = ox + (info["client_x"] - sx)
             self.console_y = oy + (info["client_y"] - sy)
-        elif self.dragging_terminal:
-            sx, sy = self._terminal_drag_start
-            ox, oy = self._terminal_drag_orig
-            self.terminal_x = ox + (info["client_x"] - sx)
-            self.terminal_y = oy + (info["client_y"] - sy)
+        elif self.dragging_log:
+            sx, sy = self._log_drag_start
+            ox, oy = self._log_drag_orig
+            card = self.dragging_log
+            self.log_x = {**self.log_x, card: ox + (info["client_x"] - sx)}
+            self.log_y = {**self.log_y, card: oy + (info["client_y"] - sy)}
 
     @rx.event
     def on_root_mouse_up(self, info: dict):
         self.dragging_note_id = ""
         self.dragging_console = False
-        self.dragging_terminal = False
+        self.dragging_log = ""

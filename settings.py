@@ -55,6 +55,7 @@ class Settings(BaseSettings):
     home_lat: float | None = None
     home_lon: float | None = None
     dashboard_autostart: bool = True
+    dashboard_open_browser: bool = True  # open a browser tab once the dashboard answers
     hope_log_path: str = str(_REPO_ROOT / "data_store/logs/hope.log")
     # ── Internet access (read-only) ──
     # Search goes through a self-hosted meta-search engine, never a search

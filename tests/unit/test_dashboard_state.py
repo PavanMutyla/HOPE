@@ -455,13 +455,13 @@ def test_mouse_up_releases_every_drag():
     s = DashboardState()
     s.start_note_drag("n1", {"client_x": 0, "client_y": 0})
     s.dragging_console = True
-    s.dragging_terminal = True
+    s.dragging_log = "tools"
 
     s.on_root_mouse_up({})
 
     assert s.dragging_note_id == ""
     assert s.dragging_console is False
-    assert s.dragging_terminal is False
+    assert s.dragging_log == ""
 
 
 # ─── terminal ───────────────────────────────────────────────────
@@ -491,12 +491,16 @@ def test_closed_panels_can_be_reopened():
     """Closing was one-way in the prototype: nothing brought a panel back."""
     s = DashboardState()
     s.close_console()
-    s.close_terminal()
-    assert (s.console_open, s.terminal_open) == (False, False)
+    for card in ("log", "tools", "web"):
+        s.close_log(card)
+    assert s.console_open is False
+    assert s.log_open == {"log": False, "tools": False, "web": False}
 
     s.open_console()
-    s.open_terminal()
-    assert (s.console_open, s.terminal_open) == (True, True)
+    for card in ("log", "tools", "web"):
+        s.open_log(card)
+    assert s.console_open is True
+    assert s.log_open == {"log": True, "tools": True, "web": True}
 
 
 # ─── liveness ───────────────────────────────────────────────────
@@ -535,3 +539,64 @@ async def test_load_live_reports_not_running_for_a_stale_session(feed, monkeypat
     assert s.hope_is_running is False
     # the turns are still there to read; only the liveness claim is withdrawn
     assert len(s.live_turns) == 1
+
+
+def _loguru(time: str, level: str, message: str) -> str:
+    return f"2026-10-26 {time}.123 | {level:<8} | some.module:fn:12 - {message}"
+
+
+async def test_tool_and_web_cards_filter_the_same_log(tmp_path, monkeypatch):
+    log = tmp_path / "hope.log"
+    log.write_text("\n".join([
+        _loguru("23:50:01", "DEBUG", "OpenAILLMService#0: Generating chat"),
+        _loguru("23:50:02", "INFO", "[tool] hope → search_web(query='kokoro')"),
+        _loguru("23:50:02", "INFO", '[web] hope searching: "kokoro"'),
+        _loguru("23:50:03", "INFO", "[tool] search_web answered in 1.2s (300 chars)"),
+        _loguru("23:50:04", "INFO", "[agents] Spawned researcher Sarah (af_sarah): voices"),
+        _loguru("23:50:05", "WARNING", "[research] Sarah blocked: localhost is private"),
+        _loguru("23:50:06", "INFO", "[degoog] Ready on 127.0.0.1:4444"),
+        "    a traceback line with [tool] in it",
+    ]))
+    monkeypatch.setattr(state_module.settings, "hope_log_path", str(log))
+
+    s = DashboardState()
+    await s.load_terminal()
+
+    assert len(s.terminal_lines) == 8  # the Log card still shows everything
+    assert s.tool_rows == [
+        {"time": "23:50:02", "text": "hope → search_web(query='kokoro')", "warn": ""},
+        {"time": "23:50:03", "text": "search_web answered in 1.2s (300 chars)", "warn": ""},
+    ]
+    assert [r["text"] for r in s.web_rows] == [
+        'hope searching: "kokoro"',
+        "Spawned researcher Sarah (af_sarah): voices",
+        "Sarah blocked: localhost is private",
+        "degoog: Ready on 127.0.0.1:4444",
+    ]
+    assert [r["warn"] for r in s.web_rows] == ["", "", "1", ""]
+
+
+async def test_activity_cards_keep_only_the_latest_rows(tmp_path, monkeypatch):
+    log = tmp_path / "hope.log"
+    log.write_text("\n".join(
+        _loguru("23:50:01", "INFO", f"[tool] hope → get_tasks(n={i})") for i in range(300)
+    ))
+    monkeypatch.setattr(state_module.settings, "hope_log_path", str(log))
+
+    s = DashboardState()
+    await s.load_terminal()
+
+    assert len(s.tool_rows) == 200
+    assert s.tool_rows[-1]["text"] == "hope → get_tasks(n=299)"
+    assert s.web_rows == []
+
+
+def test_dragging_a_log_card_moves_only_that_card():
+    s = DashboardState()
+    start = (dict(s.log_x), dict(s.log_y))
+    s.start_log_drag("web", {"client_x": 100, "client_y": 100})
+    s.on_root_mouse_move({"client_x": 130, "client_y": 80})
+
+    assert (s.log_x["web"], s.log_y["web"]) == (start[0]["web"] + 30, start[1]["web"] - 20)
+    assert s.log_x["log"] == start[0]["log"] and s.log_y["tools"] == start[1]["tools"]
+

@@ -1,5 +1,5 @@
-"""The "[tool]" and "[web]" log lines: one per tool call and one per answer,
-plus HOPE's own web searches."""
+"""The "[tool]" and "[web]" log lines the dashboard's Tools and Web cards
+filter on, and the browser hope.py opens once the dashboard answers."""
 
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -90,3 +90,49 @@ async def test_hope_web_search_is_logged_for_the_web_card(log_lines):
     await _make_search_web_handler(provider)(_params({"query": "kokoro"}, AsyncMock()))
     assert log_lines == ['[web] hope searching: "kokoro"', "[web] got 1 results"]
 
+
+# ── dashboard auto-open ─────────────────────────────────────────
+
+class _Proc:
+    def __init__(self, exits_after: int | None = None):
+        self._polls = 0
+        self._exits_after = exits_after
+
+    def poll(self):
+        self._polls += 1
+        if self._exits_after is not None and self._polls > self._exits_after:
+            return 1
+        return None
+
+
+@pytest.fixture
+def hope_module(monkeypatch):
+    import hope
+
+    opened: list[str] = []
+    monkeypatch.setattr(hope.webbrowser, "open", opened.append)
+    monkeypatch.setattr(hope.asyncio, "sleep", AsyncMock())
+    return hope, opened
+
+
+@pytest.mark.integration
+async def test_browser_opens_once_the_dashboard_answers(hope_module, monkeypatch):
+    hope, opened = hope_module
+    answers = iter([False, False, True])
+    monkeypatch.setattr(hope, "is_listening", lambda port: next(answers))
+
+    await hope._open_dashboard_when_ready(_Proc())
+    assert opened == ["http://localhost:3000"]
+
+
+@pytest.mark.integration
+async def test_browser_not_opened_when_turned_off_or_reflex_dies(hope_module, monkeypatch):
+    hope, opened = hope_module
+    monkeypatch.setattr(hope, "is_listening", lambda port: False)
+
+    await hope._open_dashboard_when_ready(_Proc(exits_after=2))  # reflex crashed
+    await hope._open_dashboard_when_ready(None)  # autostart off
+    monkeypatch.setattr(hope.settings, "dashboard_open_browser", False)
+    monkeypatch.setattr(hope, "is_listening", lambda port: True)
+    await hope._open_dashboard_when_ready(_Proc())
+    assert opened == []

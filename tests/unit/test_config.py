@@ -450,3 +450,9 @@ def test_degoog_dir_defaults_to_absolute_data_store_path(fake_env):
     s = Settings(_env_file=None)
     assert Path(s.degoog_dir).is_absolute()
     assert s.degoog_dir.endswith("data_store/degoog")
+
+
+@pytest.mark.unit
+def test_dashboard_open_browser_defaults_on(fake_env):
+    from settings import Settings
+    assert Settings(_env_file=None).dashboard_open_browser is True

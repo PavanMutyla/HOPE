@@ -135,7 +135,7 @@ class DeepResearch:
         report, spoken = await self._write(question, finished)
         report_path = run_dir / "report.md"
         await asyncio.to_thread(_write_text, report_path, f"# {question}\n\n{report}\n")
-        logger.info(f"[research] Run {run_id} done — report saved to {report_path}")
+        logger.info(f"[research] Run {run_id} done, report saved to {report_path}")
         await asyncio.to_thread(
             self._blackboard.update_run, run_id, "completed", str(report_path), spoken
         )
@@ -176,7 +176,7 @@ class DeepResearch:
             await self._manager.set_status(live, "failed")
             return
         logger.info(
-            f"[research] {live.spoken_name} finished — read {len(toolbox.pages_read)} page(s)"
+            f"[research] {live.spoken_name} finished, read {len(toolbox.pages_read)} page(s)"
         )
         live.findings = findings
         await asyncio.to_thread(
@@ -199,7 +199,7 @@ class DeepResearch:
         for _ in range(_MAX_LOOP_TURNS):
             out_of_budget = calls_left <= 0
             if out_of_budget:
-                logger.info(f"[research] {live.spoken_name} used its tool budget — writing findings")
+                logger.info(f"[research] {live.spoken_name} used its tool budget, writing findings")
                 messages.append({
                     "role": "user",
                     "content": "Tool budget used up. Write your findings now from what you've read.",
