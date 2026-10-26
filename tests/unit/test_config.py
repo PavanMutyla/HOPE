@@ -218,49 +218,184 @@ def test_context_keep_recent_default(fake_env):
 
 
 @pytest.mark.unit
-def test_episodic_db_path_default(fake_env):
+def test_episodic_db_path_default(fake_env, monkeypatch):
+    # conftest points this at a temp dir so tests can't touch real data;
+    # the default under test is only visible with that override removed.
+    from pathlib import Path
+
     from settings import Settings
+
+    monkeypatch.delenv("EPISODIC_DB_PATH", raising=False)
     s = Settings(_env_file=None)
-    assert s.episodic_db_path == "data_store/episodic_memory/episodic.db"
+    assert Path(s.episodic_db_path).parts[-3:] == ("data_store", "episodic_memory", "episodic.db")
+    assert Path(s.episodic_db_path).is_absolute()
 
 
 @pytest.mark.unit
-def test_episodic_media_dir_default(fake_env):
+def test_episodic_media_dir_default(fake_env, monkeypatch):
+    # conftest points this at a temp dir so tests can't touch real data;
+    # the default under test is only visible with that override removed.
+    from pathlib import Path
+
     from settings import Settings
+
+    monkeypatch.delenv("EPISODIC_MEDIA_DIR", raising=False)
     s = Settings(_env_file=None)
-    assert s.episodic_media_dir == "data_store/episodic_memory/media"
+    assert Path(s.episodic_media_dir).parts[-3:] == ("data_store", "episodic_memory", "media")
+    assert Path(s.episodic_media_dir).is_absolute()
 
 
 @pytest.mark.unit
-def test_chroma_persist_dir_default(fake_env):
+def test_chroma_persist_dir_default(fake_env, monkeypatch):
+    # conftest points this at a temp dir so tests can't touch real data;
+    # the default under test is only visible with that override removed.
+    from pathlib import Path
+
     from settings import Settings
+
+    monkeypatch.delenv("CHROMA_PERSIST_DIR", raising=False)
     s = Settings(_env_file=None)
-    assert s.chroma_persist_dir == "data_store/episodic_memory/chroma"
+    assert Path(s.chroma_persist_dir).parts[-3:] == ("data_store", "episodic_memory", "chroma")
+    assert Path(s.chroma_persist_dir).is_absolute()
 
 
 @pytest.mark.unit
 def test_semantic_persist_dir_default(fake_env):
+    from pathlib import Path
     from settings import Settings
     s = Settings(_env_file=None)
-    assert s.semantic_persist_dir == "data_store/semantic_memory/chroma"
+    assert Path(s.semantic_persist_dir).parts[-3:] == ("data_store", "semantic_memory", "chroma")
+    assert Path(s.semantic_persist_dir).is_absolute()
 
 
 @pytest.mark.unit
 def test_semantic_history_db_path_default(fake_env):
+    from pathlib import Path
     from settings import Settings
     s = Settings(_env_file=None)
-    assert s.semantic_history_db_path == "data_store/semantic_memory/history.db"
+    assert Path(s.semantic_history_db_path).parts[-3:] == ("data_store", "semantic_memory", "history.db")
+    assert Path(s.semantic_history_db_path).is_absolute()
 
 
 @pytest.mark.unit
 def test_procedures_dir_default(fake_env):
+    from pathlib import Path
     from settings import Settings
     s = Settings(_env_file=None)
-    assert s.procedures_dir == "procedures"
+    assert Path(s.procedures_dir).name == "procedures"
+    assert Path(s.procedures_dir).is_absolute()
 
 
 @pytest.mark.unit
 def test_blackboard_db_path_default(fake_env):
+    from pathlib import Path
     from settings import Settings
     s = Settings(_env_file=None)
-    assert s.blackboard_db_path == "data_store/coordination/blackboard.db"
+    assert Path(s.blackboard_db_path).parts[-3:] == ("data_store", "coordination", "blackboard.db")
+    assert Path(s.blackboard_db_path).is_absolute()
+
+
+# ─── dashboard / shared-board keys ──────────────────────────────
+#
+# These arrived with the dashboard and shared board but were never covered.
+# All have defaults, so a rename or a broken default fails silently rather
+# than raising ValidationError like the required keys above do — which is
+# exactly why they need pinning here.
+#
+# conftest's pytest_configure points BOARD_DB_PATH and HOPE_LOG_PATH at a temp
+# dir so importing dashboard/dashboard/state.py can't touch the real board.
+# That env var would mask the default under test, hence the delenv.
+
+
+@pytest.mark.unit
+def test_board_db_path_defaults_next_to_the_other_data_stores(fake_env, monkeypatch):
+    from pathlib import Path
+
+    from settings import Settings
+
+    monkeypatch.delenv("BOARD_DB_PATH", raising=False)
+    s = Settings(_env_file=None)
+    assert Path(s.board_db_path).parts[-3:] == ("data_store", "board", "board.db")
+
+
+@pytest.mark.unit
+def test_board_db_path_is_absolute(fake_env, monkeypatch):
+    """The dashboard runs as its own process with dashboard/ as CWD, so a
+    relative default here would resolve to two different files depending on
+    which process opened it — the one bug this absolute path exists to avoid."""
+    from pathlib import Path
+
+    from settings import Settings
+
+    monkeypatch.delenv("BOARD_DB_PATH", raising=False)
+    s = Settings(_env_file=None)
+    assert Path(s.board_db_path).is_absolute()
+
+
+@pytest.mark.unit
+def test_hope_log_path_defaults_under_data_store_and_is_absolute(fake_env, monkeypatch):
+    from pathlib import Path
+
+    from settings import Settings
+
+    monkeypatch.delenv("HOPE_LOG_PATH", raising=False)
+    s = Settings(_env_file=None)
+    assert Path(s.hope_log_path).parts[-3:] == ("data_store", "logs", "hope.log")
+    assert Path(s.hope_log_path).is_absolute()
+
+
+@pytest.mark.unit
+def test_dashboard_autostart_defaults_on(fake_env):
+    from settings import Settings
+    s = Settings(_env_file=None)
+    assert s.dashboard_autostart is True
+
+
+@pytest.mark.unit
+def test_dashboard_autostart_can_be_turned_off(fake_env, monkeypatch):
+    from settings import Settings
+
+    monkeypatch.setenv("DASHBOARD_AUTOSTART", "false")
+    s = Settings(_env_file=None)
+    assert s.dashboard_autostart is False
+
+
+@pytest.mark.unit
+def test_home_location_defaults_to_autodetect(fake_env, monkeypatch):
+    """Empty/None is the signal memory/board/live.py reads as 'detect from the
+    network' — a non-empty default would silently pin everyone to one city."""
+    from settings import Settings
+
+    for key in ("HOME_CITY", "HOME_LAT", "HOME_LON"):
+        monkeypatch.delenv(key, raising=False)
+    s = Settings(_env_file=None)
+    assert s.home_city == ""
+    assert s.home_lat is None
+    assert s.home_lon is None
+
+
+@pytest.mark.unit
+def test_home_location_can_be_pinned(fake_env, monkeypatch):
+    from settings import Settings
+
+    monkeypatch.setenv("HOME_CITY", "Bengaluru")
+    monkeypatch.setenv("HOME_LAT", "12.97")
+    monkeypatch.setenv("HOME_LON", "77.59")
+    s = Settings(_env_file=None)
+    assert s.home_city == "Bengaluru"
+    assert s.home_lat == 12.97
+    assert s.home_lon == 77.59
+
+
+@pytest.mark.unit
+def test_live_db_path_defaults_under_data_store_and_is_absolute(fake_env, monkeypatch):
+    """Same absolute-path reasoning as board_db_path — hope.py writes this file
+    and the dashboard process, running from dashboard/, reads it."""
+    from pathlib import Path
+
+    from settings import Settings
+
+    monkeypatch.delenv("LIVE_DB_PATH", raising=False)
+    s = Settings(_env_file=None)
+    assert Path(s.live_db_path).parts[-3:] == ("data_store", "live", "live.db")
+    assert Path(s.live_db_path).is_absolute()

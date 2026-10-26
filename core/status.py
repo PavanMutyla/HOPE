@@ -1,3 +1,4 @@
+from loguru import logger
 from rich.live import Live
 from rich.panel import Panel
 from rich.text import Text
@@ -33,6 +34,7 @@ class StatusPanel:
 
     def set_state(self, state: str):
         self.state = state
+        logger.debug(f"[{self.agent_name or 'hope'}] {state}")
         self._refresh()
 
     def set_agent(self, name: str):
@@ -41,6 +43,7 @@ class StatusPanel:
 
     def set_transcript(self, text: str):
         self.last_transcript = text
+        logger.info(f"[{self.agent_name or 'hope'}] You: {text}")
         self._refresh()
 
     def set_usage(self, last_prompt: int, last_completion: int, total: int,
@@ -51,6 +54,7 @@ class StatusPanel:
             f"  •  ctx {context_pct:.1%}"
             f"  •  ttfb {ttfb:.2f}s"
         )
+        logger.debug(f"[{self.agent_name or 'hope'}] tokens: {self.usage_line}")
         self._refresh()
 
     def _refresh(self):

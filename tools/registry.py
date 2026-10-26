@@ -10,16 +10,23 @@ from sub_agents.atlas.agent import Atlas
 from core.voice.agent_state import agent_state
 from core.voice.orchestrator import VoiceOrchestrator
 from core.voice.team_state import team_state
+from memory.board import live as board_live
 from tools.schema import (
+    AddTaskArgs,
     CheckPlansArgs,
     ClaimTaskArgs,
     ConnectToAtlasArgs,
     ConsultAgentsArgs,
     DelegateToAtlasArgs,
+    DeleteTaskArgs,
     DisableTeamModeArgs,
     EnableTeamModeArgs,
     GetActiveTasksArgs,
+    GetLocationAndTimeArgs,
+    GetQuickNoteArgs,
     GetSignalsArgs,
+    GetTasksArgs,
+    GetWeatherArgs,
     HandbackToHopeArgs,
     PostTaskArgs,
     RecallMemoryArgs,
@@ -28,6 +35,9 @@ from tools.schema import (
     RecordProcedureOutcomeArgs,
     SaveProcedureArgs,
     SendSignalArgs,
+    ToggleTaskArgs,
+    UpdateQuickNoteArgs,
+    UpdateTaskArgs,
     UpdateTaskStatusArgs,
     function_schema,
 )
@@ -212,6 +222,67 @@ get_signals_schema = function_schema(
     GetSignalsArgs,
 )
 
+add_task_schema = function_schema(
+    "add_task",
+    (
+        "Add an item to the shared board's Today, Planned, or Pending list — "
+        "visible to Pavan and every agent, not just you."
+    ),
+    AddTaskArgs,
+)
+
+update_task_schema = function_schema(
+    "update_task",
+    "Change the text of an existing board task.",
+    UpdateTaskArgs,
+)
+
+toggle_task_schema = function_schema(
+    "toggle_task",
+    "Mark a board task done, or undone if it's already done.",
+    ToggleTaskArgs,
+)
+
+delete_task_schema = function_schema(
+    "delete_task",
+    "Remove an item from the board entirely.",
+    DeleteTaskArgs,
+)
+
+get_tasks_schema = function_schema(
+    "get_tasks",
+    "Read the current items on one of the board's Today, Planned, or Pending lists.",
+    GetTasksArgs,
+)
+
+get_quick_note_schema = function_schema(
+    "get_quick_note",
+    "Read the shared board's Quick notes.",
+    GetQuickNoteArgs,
+)
+
+update_quick_note_schema = function_schema(
+    "update_quick_note",
+    (
+        "Replace the shared board's Quick notes with new content. This overwrites "
+        "the whole note, so read it first with get_quick_note if you want to add "
+        "to what's already there rather than replace it."
+    ),
+    UpdateQuickNoteArgs,
+)
+
+get_location_and_time_schema = function_schema(
+    "get_location_and_time",
+    "Get Pavan's home location and the current local date/time.",
+    GetLocationAndTimeArgs,
+)
+
+get_weather_schema = function_schema(
+    "get_weather",
+    "Get the current weather and today's forecast at Pavan's home location.",
+    GetWeatherArgs,
+)
+
 ALL_SCHEMAS = [
     delegate_to_atlas_schema,
     connect_to_atlas_schema,
@@ -231,6 +302,15 @@ ALL_SCHEMAS = [
     get_active_tasks_schema,
     send_signal_schema,
     get_signals_schema,
+    add_task_schema,
+    update_task_schema,
+    toggle_task_schema,
+    delete_task_schema,
+    get_tasks_schema,
+    get_quick_note_schema,
+    update_quick_note_schema,
+    get_location_and_time_schema,
+    get_weather_schema,
 ]
 
 # ── Handlers ──────────────────────────────────────────────────────────────────
@@ -500,6 +580,115 @@ def _make_get_signals_handler(orchestrator: "VoiceOrchestrator"):
     return handler
 
 
+def _make_add_task_handler(orchestrator: "VoiceOrchestrator"):
+    async def handler(params: FunctionCallParams) -> None:
+        args = AddTaskArgs(**params.arguments)
+
+        item = await asyncio.to_thread(
+            orchestrator.bundle.board.add_item, args.list_type, args.text, agent_state.active
+        )
+        await params.result_callback(f"Added to {args.list_type} (id {item.id}): {item.text}")
+    return handler
+
+
+def _make_update_task_handler(orchestrator: "VoiceOrchestrator"):
+    async def handler(params: FunctionCallParams) -> None:
+        args = UpdateTaskArgs(**params.arguments)
+
+        item = await asyncio.to_thread(
+            orchestrator.bundle.board.update_item_text, args.item_id, args.text, agent_state.active
+        )
+        if item is None:
+            await params.result_callback(f"No task found with id {args.item_id}.")
+        else:
+            await params.result_callback(f"Updated task {item.id}: {item.text}")
+    return handler
+
+
+def _make_toggle_task_handler(orchestrator: "VoiceOrchestrator"):
+    async def handler(params: FunctionCallParams) -> None:
+        args = ToggleTaskArgs(**params.arguments)
+
+        item = await asyncio.to_thread(
+            orchestrator.bundle.board.toggle_item, args.item_id, agent_state.active
+        )
+        if item is None:
+            await params.result_callback(f"No task found with id {args.item_id}.")
+        else:
+            state = "done" if item.done else "not done"
+            await params.result_callback(f"Task {item.id} is now {state}.")
+    return handler
+
+
+def _make_delete_task_handler(orchestrator: "VoiceOrchestrator"):
+    async def handler(params: FunctionCallParams) -> None:
+        args = DeleteTaskArgs(**params.arguments)
+
+        deleted = await asyncio.to_thread(orchestrator.bundle.board.delete_item, args.item_id)
+        if deleted:
+            await params.result_callback(f"Deleted task {args.item_id}.")
+        else:
+            await params.result_callback(f"No task found with id {args.item_id}.")
+    return handler
+
+
+def _make_get_tasks_handler(orchestrator: "VoiceOrchestrator"):
+    async def handler(params: FunctionCallParams) -> None:
+        args = GetTasksArgs(**params.arguments)
+
+        items = await asyncio.to_thread(orchestrator.bundle.board.list_items, args.list_type)
+        if not items:
+            await params.result_callback(f"Nothing on the {args.list_type} list.")
+            return
+
+        lines = [
+            f"- ({item.id}) {item.text} [{'done' if item.done else 'not done'}, {item.agent}]"
+            for item in items
+        ]
+        await params.result_callback("\n".join(lines))
+    return handler
+
+
+def _make_get_quick_note_handler(orchestrator: "VoiceOrchestrator"):
+    async def handler(params: FunctionCallParams) -> None:
+        GetQuickNoteArgs(**params.arguments)
+
+        note = await asyncio.to_thread(orchestrator.bundle.board.get_quick_note)
+        if not note.content:
+            await params.result_callback("Quick notes is empty.")
+        else:
+            await params.result_callback(note.content)
+    return handler
+
+
+def _make_update_quick_note_handler(orchestrator: "VoiceOrchestrator"):
+    async def handler(params: FunctionCallParams) -> None:
+        args = UpdateQuickNoteArgs(**params.arguments)
+
+        await asyncio.to_thread(
+            orchestrator.bundle.board.update_quick_note, args.content, agent_state.active
+        )
+        await params.result_callback("Quick notes updated.")
+    return handler
+
+
+async def get_location_and_time_handler(params: FunctionCallParams) -> None:
+    GetLocationAndTimeArgs(**params.arguments)
+    info = await board_live.get_location_and_time()
+    await params.result_callback(
+        f"{info['city']} ({info['lat']}, {info['lon']}) — {info['local_time']} on {info['local_date']}."
+    )
+
+
+async def get_weather_handler(params: FunctionCallParams) -> None:
+    GetWeatherArgs(**params.arguments)
+    w = await board_live.get_weather()
+    await params.result_callback(
+        f"{w['temp_c']}°C, {w['condition']}. High {w['hi_c']}°, low {w['lo_c']}°, "
+        f"wind {w['wind_kmh']} km/h."
+    )
+
+
 # ── Wiring ────────────────────────────────────────────────────────────────────
 
 def setup(orchestrator: "VoiceOrchestrator") -> None:
@@ -593,5 +782,50 @@ def setup(orchestrator: "VoiceOrchestrator") -> None:
     llm.register_function(
         "get_signals",
         _make_get_signals_handler(orchestrator),
+        cancel_on_interruption=False,
+    )
+    llm.register_function(
+        "add_task",
+        _make_add_task_handler(orchestrator),
+        cancel_on_interruption=False,
+    )
+    llm.register_function(
+        "update_task",
+        _make_update_task_handler(orchestrator),
+        cancel_on_interruption=False,
+    )
+    llm.register_function(
+        "toggle_task",
+        _make_toggle_task_handler(orchestrator),
+        cancel_on_interruption=False,
+    )
+    llm.register_function(
+        "delete_task",
+        _make_delete_task_handler(orchestrator),
+        cancel_on_interruption=False,
+    )
+    llm.register_function(
+        "get_tasks",
+        _make_get_tasks_handler(orchestrator),
+        cancel_on_interruption=False,
+    )
+    llm.register_function(
+        "get_quick_note",
+        _make_get_quick_note_handler(orchestrator),
+        cancel_on_interruption=False,
+    )
+    llm.register_function(
+        "update_quick_note",
+        _make_update_quick_note_handler(orchestrator),
+        cancel_on_interruption=False,
+    )
+    llm.register_function(
+        "get_location_and_time",
+        get_location_and_time_handler,
+        cancel_on_interruption=False,
+    )
+    llm.register_function(
+        "get_weather",
+        get_weather_handler,
         cancel_on_interruption=False,
     )

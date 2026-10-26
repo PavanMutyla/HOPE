@@ -25,8 +25,8 @@ from tools.registry import (
 
 
 @pytest.mark.unit
-def test_all_schemas_contains_exactly_eighteen_tools():
-    assert len(ALL_SCHEMAS) == 18
+def test_all_schemas_contains_exactly_twenty_seven_tools():
+    assert len(ALL_SCHEMAS) == 27
 
 
 @pytest.mark.unit
@@ -51,6 +51,15 @@ def test_all_schemas_names_are_correct():
         "get_active_tasks",
         "send_signal",
         "get_signals",
+        "add_task",
+        "update_task",
+        "toggle_task",
+        "delete_task",
+        "get_tasks",
+        "get_quick_note",
+        "update_quick_note",
+        "get_location_and_time",
+        "get_weather",
     }
 
 

@@ -6,8 +6,12 @@ and handlers parse params.arguments through the same model instead of hand-
 indexing a raw dict.
 """
 
+from typing import Literal
+
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pydantic import BaseModel, Field
+
+BoardListType = Literal["today", "planned", "pending"]
 
 
 def function_schema(name: str, description: str, args_model: type[BaseModel]) -> FunctionSchema:
@@ -137,3 +141,45 @@ class GetSignalsArgs(BaseModel):
         default=None,
         description="Whose unread signals to check. Omit to check your own.",
     )
+
+
+class AddTaskArgs(BaseModel):
+    list_type: BoardListType = Field(
+        description="Which board list to add to: 'today', 'planned', or 'pending'."
+    )
+    text: str = Field(description="The task text.")
+
+
+class UpdateTaskArgs(BaseModel):
+    item_id: int = Field(description="The task's id, as returned by add_task or get_tasks.")
+    text: str = Field(description="The new text for the task.")
+
+
+class ToggleTaskArgs(BaseModel):
+    item_id: int = Field(description="The task's id, as returned by add_task or get_tasks.")
+
+
+class DeleteTaskArgs(BaseModel):
+    item_id: int = Field(description="The task's id, as returned by add_task or get_tasks.")
+
+
+class GetTasksArgs(BaseModel):
+    list_type: BoardListType = Field(
+        description="Which board list to read: 'today', 'planned', or 'pending'."
+    )
+
+
+class GetQuickNoteArgs(BaseModel):
+    pass
+
+
+class UpdateQuickNoteArgs(BaseModel):
+    content: str = Field(description="The full new content of the shared quick notes.")
+
+
+class GetLocationAndTimeArgs(BaseModel):
+    pass
+
+
+class GetWeatherArgs(BaseModel):
+    pass
