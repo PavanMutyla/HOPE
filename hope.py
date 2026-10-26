@@ -22,6 +22,7 @@ from core.voice.voice_pool import VoicePool
 from core.prompt import SYSTEM_PROMPT
 from settings import settings
 from tools.registry import ALL_SCHEMAS, setup as setup_tools
+from tools.web.degoog_service import DegoogService
 from tools.web.search import build_search_provider
 
 _REPO_ROOT = Path(__file__).parent
@@ -74,6 +75,16 @@ def _stop_dashboard(proc: subprocess.Popen | None) -> None:
             pass
 
 
+def _build_degoog() -> DegoogService | None:
+    if not settings.degoog_autostart or settings.search_provider != "degoog":
+        return None
+    return DegoogService(
+        settings.degoog_url,
+        settings.degoog_dir,
+        Path(settings.hope_log_path).parent / "degoog.log",
+    )
+
+
 _LIVE_HEARTBEAT_SECONDS = 10
 
 
@@ -105,7 +116,12 @@ async def main():
     logger.add(settings.hope_log_path, level="DEBUG", rotation="5 MB", retention=3, enqueue=True)
 
     dashboard_proc = _start_dashboard()
+    degoog = _build_degoog()
     try:
+        if degoog is not None:
+            await asyncio.to_thread(degoog.start)
+            asyncio.create_task(degoog.warm_up())
+
         registry = AgentRegistry()
         registry.register(hope_agent)
         registry.register(atlas_agent)
@@ -169,6 +185,8 @@ async def main():
             bundle.live_feed.close()
             atlas_team_member.voice.close()
     finally:
+        if degoog is not None:
+            degoog.stop()
         _stop_dashboard(dashboard_proc)
 
 

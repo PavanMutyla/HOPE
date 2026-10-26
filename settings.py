@@ -63,6 +63,9 @@ class Settings(BaseSettings):
     degoog_url: str = "http://localhost:4444"
     degoog_api_key: str = ""  # only if the instance protects /api/search
     searxng_url: str = "http://localhost:8888"
+    # Start a local degoog with HOPE (Bun, else Docker) — see tools/web/degoog_service.py.
+    degoog_autostart: bool = True
+    degoog_dir: str = str(_REPO_ROOT / "data_store/degoog")
     # ── Dynamically spawned sub-agents ──
     max_live_subagents: int = 5  # hard cap, enforced in code, not the prompt
     research_llm_model: str = "gpt-4o-mini"

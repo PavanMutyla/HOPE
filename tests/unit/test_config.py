@@ -435,3 +435,18 @@ def test_research_dir_default(fake_env, monkeypatch):
     s = Settings(_env_file=None)
     assert Path(s.research_dir).parts[-2:] == ("data_store", "research")
     assert Path(s.research_dir).is_absolute()
+
+
+@pytest.mark.unit
+def test_degoog_autostart_defaults_on(fake_env):
+    from settings import Settings
+    assert Settings(_env_file=None).degoog_autostart is True
+
+
+@pytest.mark.unit
+def test_degoog_dir_defaults_to_absolute_data_store_path(fake_env):
+    from pathlib import Path
+    from settings import Settings
+    s = Settings(_env_file=None)
+    assert Path(s.degoog_dir).is_absolute()
+    assert s.degoog_dir.endswith("data_store/degoog")
