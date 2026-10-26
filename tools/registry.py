@@ -16,6 +16,7 @@ from core.voice.agent_state import agent_state
 from core.voice.orchestrator import VoiceOrchestrator
 from core.voice.team_state import team_state
 from memory.board import live as board_live
+from settings import settings
 from sub_agents.research.deep_research import DeepResearch
 from tools.tool_log import brief_args
 from tools.web import fetch
@@ -65,7 +66,7 @@ atlas = Atlas()
 delegate_to_atlas_schema = function_schema(
     "delegate_to_atlas",
     (
-        "Delegate a filesystem task to Atlas. Use whenever Pavan asks to create, "
+        f"Delegate a filesystem task to Atlas. Use whenever {settings.user_name} asks to create, "
         "read, edit, or delete files or folders. Pass a clear natural-language "
         "description of the task."
     ),
@@ -75,8 +76,8 @@ delegate_to_atlas_schema = function_schema(
 connect_to_agent_schema = function_schema(
     "connect_to_agent",
     (
-        "Switch the active voice to another agent so Pavan can speak with it directly — "
-        "Atlas, or any live researcher by its spoken name. Use when Pavan says "
+        f"Switch the active voice to another agent so {settings.user_name} can speak with it directly — "
+        f"Atlas, or any live researcher by its spoken name. Use when {settings.user_name} says "
         "'connect me to Atlas', 'let me talk to Emma', or similar."
     ),
     ConnectToAgentArgs,
@@ -86,7 +87,7 @@ handback_to_hope_schema = function_schema(
     "handback_to_hope",
     (
         "Hand the active voice back to HOPE. "
-        "Use when Pavan says 'HOPE take over', 'back to HOPE', 'thanks Atlas', 'thanks Emma', "
+        f"Use when {settings.user_name} says 'HOPE take over', 'back to HOPE', 'thanks Atlas', 'thanks Emma', "
         "or similar."
     ),
     HandbackToHopeArgs,
@@ -118,7 +119,7 @@ save_procedure_schema = function_schema(
     (
         "Save a reusable step-by-step procedure under your own name, so you can "
         "follow it again later instead of figuring it out from scratch. Only call "
-        "this when Pavan explicitly confirms he wants something remembered as a "
+        f"this when {settings.user_name} explicitly confirms they want something remembered as a "
         "procedure — never save one unprompted."
     ),
     SaveProcedureArgs,
@@ -150,7 +151,7 @@ consult_agents_schema = function_schema(
     (
         "Ask multiple agents the same question or task concurrently and gather all "
         "their replies at once, instead of contacting them one at a time. Use when "
-        "you need input from more than one agent to answer Pavan."
+        f"you need input from more than one agent to answer {settings.user_name}."
     ),
     ConsultAgentsArgs,
 )
@@ -160,7 +161,7 @@ enable_team_mode_schema = function_schema(
     (
         "Turn on team mode so other agents can listen in on this conversation and "
         "speak up on their own, in their own voice, when they have something "
-        "relevant to add. Use when Pavan says something like 'bring the team in' "
+        f"relevant to add. Use when {settings.user_name} says something like 'bring the team in' "
         "or 'let everyone listen in'."
     ),
     EnableTeamModeArgs,
@@ -169,7 +170,7 @@ enable_team_mode_schema = function_schema(
 disable_team_mode_schema = function_schema(
     "disable_team_mode",
     (
-        "Turn off team mode so it's back to just you and Pavan. Use when Pavan "
+        f"Turn off team mode so it's back to just you and {settings.user_name}. Use when {settings.user_name} "
         "says something like 'just us' or 'team mode off'."
     ),
     DisableTeamModeArgs,
@@ -244,7 +245,7 @@ add_task_schema = function_schema(
     "add_task",
     (
         "Add an item to the shared board's Today, Planned, or Pending list — "
-        "visible to Pavan and every agent, not just you."
+        f"visible to {settings.user_name} and every agent, not just you."
     ),
     AddTaskArgs,
 )
@@ -291,13 +292,13 @@ update_quick_note_schema = function_schema(
 
 get_location_and_time_schema = function_schema(
     "get_location_and_time",
-    "Get Pavan's home location and the current local date/time.",
+    f"Get {settings.user_name}'s home location and the current local date/time.",
     GetLocationAndTimeArgs,
 )
 
 get_weather_schema = function_schema(
     "get_weather",
-    "Get the current weather and today's forecast at Pavan's home location.",
+    f"Get the current weather and today's forecast at {settings.user_name}'s home location.",
     GetWeatherArgs,
 )
 
@@ -320,9 +321,9 @@ start_deep_research_schema = function_schema(
     "start_deep_research",
     (
         "Start a deep research run in the background: researchers, each with their own "
-        "voice, search the web in parallel and a cited report comes back. Use when Pavan "
+        f"voice, search the web in parallel and a cited report comes back. Use when {settings.user_name} "
         "asks you to research, investigate, or compare something properly. Takes a few "
-        "minutes; keep talking with Pavan meanwhile."
+        f"minutes; keep talking with {settings.user_name} meanwhile."
     ),
     StartDeepResearchArgs,
 )
@@ -342,7 +343,7 @@ list_subagents_schema = function_schema(
 retire_subagent_schema = function_schema(
     "retire_subagent",
     (
-        "Dismiss a sub-agent Pavan no longer needs, freeing its voice. Stops it if it's "
+        f"Dismiss a sub-agent {settings.user_name} no longer needs, freeing its voice. Stops it if it's "
         "still working."
     ),
     RetireSubagentArgs,

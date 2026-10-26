@@ -41,7 +41,7 @@ from settings import settings
 
 # Biases transcription toward the right names and topics. The model sometimes
 # returns this text itself on silence; PromptEchoFilter drops those.
-STT_PROMPT = "Pavan is speaking. Conversation about business, tech, and personal topics."
+STT_PROMPT = f"{settings.user_name} is speaking. Conversation about business, tech, and personal topics."
 
 
 def _build_kokoro_tts(voice_id: str) -> KokoroTTSService:

@@ -23,7 +23,7 @@ SUMMARY_SYSTEM_PROMPT = (
     "You compress conversation history for a voice assistant. Write a concise "
     "summary of the conversation below. Preserve: decisions made, facts stated, "
     "user preferences, unresolved questions, and task state. Omit filler and "
-    "pleasantries. Write in third person ('Pavan asked...', 'HOPE confirmed...')."
+    f"pleasantries. Write in third person ('{settings.user_name} asked...', 'HOPE confirmed...')."
 )
 
 # The one kind of `developer` message that is this session's own content: a
@@ -316,7 +316,7 @@ async def inject_warm_start(episodic_memory: EpisodicMemory, context, agent: str
     context.add_message({
         "role": "developer",
         "content": (
-            "Summary of your most recent session with Pavan (for context — "
+            f"Summary of your most recent session with {settings.user_name} (for context — "
             f"don't repeat it verbatim): {last_session.summary}"
         ),
     })

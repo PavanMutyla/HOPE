@@ -82,6 +82,8 @@ All data lives in `data_store/` (gitignored). Delete it to reset.
 
 **Required:** `OPENAI_API_KEY`, `USER_NAME`, `LOG_LEVEL`, `STT_MODEL`, `LLM_MODEL`, `LLM_PROVIDER`, `ATLAS_LLM_MODEL`, `ATLAS_WORKSPACE`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY` and `LANGFUSE_BASE_URL`.
 
+`USER_NAME` is what every agent calls you, and the name the speech-to-text listens for.
+
 `ATLAS_WORKSPACE` must be an absolute path to a scratch folder. It's the only place Atlas can read or write.
 
 **Common optional keys:**
@@ -127,7 +129,6 @@ HOPE is local-first, not offline.
 
 ## Limitations
 
-- The system prompt in `core/prompt.py` addresses the author by name. Edit it for your own use.
 - Only one deep research run at a time. Research costs real API money.
 - Researchers can't run JavaScript.
 - No browser voice yet: you speak through the microphone of the machine running HOPE.

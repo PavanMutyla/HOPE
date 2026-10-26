@@ -10,6 +10,9 @@ from core.voice.transcript_filter import PromptEchoFilter, is_prompt_echo
 
 pytestmark = pytest.mark.unit
 
+# The prompt as it was when the echoes below were recorded (USER_NAME=Pavan).
+RECORDED_PROMPT = "Pavan is speaking. Conversation about business, tech, and personal topics."
+
 
 def transcription(text: str) -> TranscriptionFrame:
     return TranscriptionFrame(text=text, user_id="pavan", timestamp="2026-10-27T00:00:00Z")
@@ -22,7 +25,11 @@ def transcription(text: str) -> TranscriptionFrame:
     "pavan is speaking, conversation about business tech and personal topics",
 ])
 def test_echoes_of_the_prompt_are_recognised(echo):
-    assert is_prompt_echo(echo, STT_PROMPT)
+    assert is_prompt_echo(echo, RECORDED_PROMPT)
+
+
+def test_the_prompt_carries_the_user_name_from_env():
+    assert STT_PROMPT.startswith("TestUser is speaking.")
 
 
 @pytest.mark.parametrize("speech", [
@@ -33,7 +40,7 @@ def test_echoes_of_the_prompt_are_recognised(echo):
     "",
 ])
 def test_real_speech_is_not_mistaken_for_an_echo(speech):
-    assert not is_prompt_echo(speech, STT_PROMPT)
+    assert not is_prompt_echo(speech, RECORDED_PROMPT)
 
 
 async def _run(*frames):

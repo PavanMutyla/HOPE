@@ -16,8 +16,24 @@ def test_hope_prompt_contains_identity():
 
 
 @pytest.mark.unit
-def test_hope_prompt_addresses_pavan_by_name():
-    assert "Pavan" in SYSTEM_PROMPT
+def test_hope_prompt_addresses_the_user_from_env_by_name():
+    assert "TestUser" in SYSTEM_PROMPT  # USER_NAME from conftest's fake env
+    assert "Pavan" not in SYSTEM_PROMPT
+
+
+@pytest.mark.unit
+def test_no_model_facing_text_hard_codes_pavan():
+    from core.voice.pipeline import STT_PROMPT
+    from core.voice.summarizer import SUMMARY_SYSTEM_PROMPT
+    from sub_agents.atlas.board_tools import BOARD_TOOL_SCHEMAS
+    from sub_agents.atlas.team_prompt import ATLAS_INTERJECT_PROMPT
+    from sub_agents.atlas.voice_prompt import ATLAS_VOICE_PROMPT
+    from tools.registry import ALL_SCHEMAS
+
+    texts = [STT_PROMPT, SUMMARY_SYSTEM_PROMPT, ATLAS_INTERJECT_PROMPT, ATLAS_VOICE_PROMPT,
+             str(BOARD_TOOL_SCHEMAS), *(str(s.to_default_dict()) for s in ALL_SCHEMAS)]
+    assert not [t for t in texts if "Pavan" in t]
+    assert "TestUser" in STT_PROMPT
 
 
 @pytest.mark.unit

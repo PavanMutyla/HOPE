@@ -181,7 +181,7 @@ async def main():
         @bundle.worker.event_handler("on_pipeline_started")
         async def on_pipeline_started(worker, frame):
             logger.info("Pipeline started — queuing greeting")
-            bundle.context.add_message({"role": "developer", "content": "Say a short hello to Pavan."})
+            bundle.context.add_message({"role": "developer", "content": f"Say a short hello to {settings.user_name}."})
             await bundle.worker.queue_frames([LLMRunFrame()])
 
         logger.info("HOPE is ready — start speaking!")
