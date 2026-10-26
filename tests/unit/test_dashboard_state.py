@@ -600,3 +600,31 @@ def test_dragging_a_log_card_moves_only_that_card():
     assert (s.log_x["web"], s.log_y["web"]) == (start[0]["web"] + 30, start[1]["web"] - 20)
     assert s.log_x["log"] == start[0]["log"] and s.log_y["tools"] == start[1]["tools"]
 
+
+def test_each_speaker_gets_its_own_kind_for_colouring():
+    s = DashboardState()
+    s.selected_thread = state_module.LIVE_THREAD_ID
+    s.live_turns = [
+        {"seq": 1, "role": "user", "agent": "", "text": "research python 3.14"},
+        {"seq": 2, "role": "assistant", "agent": "hope", "text": "On it."},
+        {"seq": 3, "role": "assistant", "agent": "atlas", "text": "Saved."},
+        {"seq": 4, "role": "assistant", "agent": "sarah", "text": "I read three pages."},
+        {"seq": 5, "role": "assistant", "agent": "", "text": "Fallback is HOPE."},
+    ]
+    assert [(m["kind"], m["speaker"], m["is_user"]) for m in s.console_messages] == [
+        ("user", "You", True),
+        ("hope", "HOPE", False),
+        ("atlas", "Atlas", False),
+        ("subagent", "Sarah", False),
+        ("hope", "HOPE", False),
+    ]
+
+
+def test_past_transcripts_use_the_same_speaker_kinds():
+    s = DashboardState()
+    s.selected_thread = "some-session"
+    s.transcript = [
+        {"role": "user", "agent": "hope", "text": "hi"},
+        {"role": "assistant", "agent": "michael", "text": "found it"},
+    ]
+    assert [m["kind"] for m in s.console_messages] == ["user", "subagent"]

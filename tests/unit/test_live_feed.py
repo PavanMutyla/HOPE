@@ -1,5 +1,5 @@
 """Unit tests for the live session feed — memory/live/ (SQLite layer + facade)
-and core/voice/live_feed.py's LiveFeedObserver.
+and core/voice/live_feed.py's LiveUserTap + LiveFeedObserver.
 
 This is the only channel out of the running pipeline into the dashboard
 process, so two properties matter most and are pinned hardest here:
@@ -28,7 +28,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 
-from core.voice.live_feed import LiveFeedObserver
+from core.voice.live_feed import LiveFeedObserver, LiveUserTap
 from memory.live import live
 from memory.live.store import LiveFeed
 
@@ -182,7 +182,7 @@ def test_wal_and_busy_timeout_are_set(tmp_path):
 
 async def test_user_speech_becomes_a_user_turn(feed):
     feed.start_session("run-1", "hope")
-    observer = LiveFeedObserver(feed, "run-1")
+    observer = LiveUserTap(feed, "run-1")
 
     await observe(observer, transcription("what's on my board today?"))
 
@@ -239,7 +239,7 @@ async def test_reply_buffer_does_not_leak_between_turns(feed):
 async def test_blank_transcription_is_ignored(feed):
     """VAD sometimes fires on silence; an empty bubble is worse than nothing."""
     feed.start_session("run-1", "hope")
-    observer = LiveFeedObserver(feed, "run-1")
+    observer = LiveUserTap(feed, "run-1")
 
     await observe(observer, transcription("   "))
 
@@ -248,9 +248,10 @@ async def test_blank_transcription_is_ignored(feed):
 
 async def test_state_tracks_the_conversation(feed):
     feed.start_session("run-1", "hope")
+    tap = LiveUserTap(feed, "run-1")
     observer = LiveFeedObserver(feed, "run-1")
 
-    await observe(observer, UserStartedSpeakingFrame())
+    await observe(tap, UserStartedSpeakingFrame())
     assert feed.get_status().state == "listening"
 
     await observe(observer, LLMFullResponseStartFrame())
@@ -276,11 +277,12 @@ async def test_context_pct_is_read_from_the_meter(feed):
     assert feed.get_status().context_pct == 0.63
 
 
-async def test_every_frame_passes_through_untouched(feed):
+@pytest.mark.parametrize("cls", [LiveUserTap, LiveFeedObserver])
+async def test_every_frame_passes_through_untouched(feed, cls):
     """It's a sidecar. Dropping or altering a frame here would break audio in a
     way that looks nothing like a dashboard bug."""
     feed.start_session("run-1", "hope")
-    observer = LiveFeedObserver(feed, "run-1")
+    observer = cls(feed, "run-1")
     pushed = []
 
     async def capture(frame, direction):
@@ -303,11 +305,12 @@ async def test_every_frame_passes_through_untouched(feed):
     assert pushed == frames
 
 
-async def test_a_dead_feed_never_breaks_the_pipeline(feed):
+@pytest.mark.parametrize("cls", [LiveUserTap, LiveFeedObserver])
+async def test_a_dead_feed_never_breaks_the_pipeline(feed, cls):
     """The contract that matters most: the dashboard failing must cost nothing
     but the dashboard."""
     feed.start_session("run-1", "hope")
-    observer = LiveFeedObserver(feed, "run-1")
+    observer = cls(feed, "run-1")
     feed.close()  # every subsequent write raises ProgrammingError
 
     pushed = []
@@ -341,3 +344,21 @@ def test_heartbeat_touches_updated_at_and_nothing_else(feed):
     assert after.updated_at >= before.updated_at
     assert after.state == "speaking"
     assert after.session_id == "run-1"
+
+
+async def test_each_turn_is_written_once_by_exactly_one_writer(feed):
+    """User turns are the tap's, replies are the observer's. Both seeing the
+    same frame stream must still produce one row per turn."""
+    feed.start_session("run-1", "hope")
+    tap, observer = LiveUserTap(feed, "run-1"), LiveFeedObserver(feed, "run-1")
+    frames = [
+        transcription("hello"),
+        LLMFullResponseStartFrame(), LLMTextFrame("hi Pavan"), LLMFullResponseEndFrame(),
+    ]
+    await observe(tap, *frames)
+    await observe(observer, *frames)
+
+    assert [(t.role, t.text) for t in feed.get_turns("run-1")] == [
+        ("user", "hello"), ("assistant", "hi Pavan"),
+    ]
+

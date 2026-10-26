@@ -35,13 +35,42 @@ from core.voice.agent_state import agent_state
 from memory.live.store import LiveFeed
 
 
-class LiveFeedObserver(FrameProcessor):
-    """Place this once, downstream of the LLM, so a single instance sees both
-    `TranscriptionFrame` (flowing down from STT) and `LLMTextFrame`. Placing it
-    twice the way `StatusMonitor` is placed would append every user turn twice —
-    that's harmless for a panel that only ever overwrites, but not for a log
-    that appends.
+class LiveUserTap(FrameProcessor):
+    """Writes Pavan's side of the conversation. Place it between STT and
+    `context_aggregator.user()`: the user aggregator consumes every final
+    `TranscriptionFrame` and never pushes it on, so nothing downstream of it,
+    LiveFeedObserver included, ever sees what Pavan said.
+
+    Split from LiveFeedObserver rather than placing one class twice, because
+    each turn has to be appended exactly once: this writes only user turns,
+    that writes only assistant turns.
     """
+
+    def __init__(self, feed: LiveFeed, session_id: str):
+        super().__init__()
+        self._feed = feed
+        self._session_id = session_id
+
+    def _handle_frame(self, frame) -> None:
+        try:
+            if isinstance(frame, UserStartedSpeakingFrame):
+                self._feed.set_state("listening")
+            elif isinstance(frame, TranscriptionFrame):
+                text = (frame.text or "").strip()
+                if text:
+                    self._feed.append_turn(self._session_id, "user", "", text)
+        except Exception:
+            logger.exception("Live feed user turn failed — dashboard may be stale")
+
+    async def process_frame(self, frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+        self._handle_frame(frame)
+        await self.push_frame(frame, direction)
+
+
+class LiveFeedObserver(FrameProcessor):
+    """Writes HOPE's side: place it downstream of the LLM, where the reply
+    streams past as `LLMTextFrame`s. User turns are LiveUserTap's job."""
 
     def __init__(self, feed: LiveFeed, session_id: str, meter=None):
         super().__init__()
@@ -61,18 +90,7 @@ class LiveFeedObserver(FrameProcessor):
             logger.exception(f"Live feed {what} failed — dashboard may be stale")
 
     def _handle_frame(self, frame) -> None:
-        if isinstance(frame, UserStartedSpeakingFrame):
-            self._safe("state", self._feed.set_state, "listening")
-
-        elif isinstance(frame, TranscriptionFrame):
-            text = (frame.text or "").strip()
-            if text:
-                self._safe(
-                    "user turn", self._feed.append_turn,
-                    self._session_id, "user", "", text,
-                )
-
-        elif isinstance(frame, LLMFullResponseStartFrame):
+        if isinstance(frame, LLMFullResponseStartFrame):
             self._reply_parts = []
             self._safe("state", self._feed.set_state, "thinking")
 

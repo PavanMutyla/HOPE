@@ -74,32 +74,44 @@ def _status_line() -> rx.Component:
     )
 
 
+def _speaker_color(kind: rx.Var[str], palette: dict[str, str]) -> rx.Var:
+    return rx.match(
+        kind,
+        ("user", palette["user"]),
+        ("atlas", palette["atlas"]),
+        ("subagent", palette["subagent"]),
+        palette["hope"],
+    )
+
+
 def _message(message: rx.Var[dict]) -> rx.Component:
-    """Speaker name above the text rather than an avatar chip beside it: with
-    only two participants, a name reads faster than a coloured initial, and it
-    stays legible when a turn is one word long."""
+    """Speaker name above the text, and each speaker in its own colour, so a
+    transcript with you, HOPE, Atlas and a researcher or two can be skimmed by
+    who is talking. Your turns also sit on the right, which keeps the
+    distinction for anyone who can't tell the colours apart."""
+    color = _speaker_color(message["kind"], s.SPEAKER)
     return rx.el.div(
         rx.el.div(
             message["speaker"],
+            translate="no",  # names: HOPE, Atlas, Sarah
             style={
                 "fontFamily": s.FONT_MONO, "fontSize": s.SIZE_MICRO,
-                "letterSpacing": "0.5px", "marginBottom": "4px",
-                "color": rx.cond(message["is_user"], s.TEXT_MUTED, s.ACCENT),
+                "letterSpacing": "0.5px", "marginBottom": "4px", "color": color,
             },
         ),
         rx.el.p(
             message["text"],
             style={
                 "margin": 0, "fontSize": s.SIZE_BODY, "lineHeight": 1.6,
-                "color": rx.cond(message["is_user"], s.TEXT_DIM, s.TEXT),
-                "whiteSpace": "pre-wrap", "overflowWrap": "anywhere",
+                "color": s.TEXT, "whiteSpace": "pre-wrap", "overflowWrap": "anywhere",
             },
         ),
         style={
             "padding": "10px 12px", "borderRadius": s.RADIUS, "maxWidth": "62ch",
             "marginLeft": rx.cond(message["is_user"], "auto", "0"),
-            "background": rx.cond(message["is_user"], s.PANEL_RAISED, "transparent"),
-            "borderLeft": rx.cond(message["is_user"], "none", f"2px solid {s.ACCENT}"),
+            "background": _speaker_color(message["kind"], s.SPEAKER_SOFT),
+            "borderLeft": rx.cond(message["is_user"], "none", f"2px solid {color}"),
+            "borderRight": rx.cond(message["is_user"], f"2px solid {color}", "none"),
         },
     )
 

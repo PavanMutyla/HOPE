@@ -136,6 +136,20 @@ def _activity_rows(lines: list[str], tags: tuple[str, ...]) -> list[dict]:
     return rows[-_LOG_TAIL_LINES:]
 
 
+def _speaker(role: str, agent: str) -> dict:
+    """Who said a turn, as the console colours it: you, HOPE, Atlas, or one of
+    the spawned researchers (any other agent name; they're named after their
+    voice, e.g. "sarah")."""
+    if role == "user":
+        return {"is_user": True, "kind": "user", "speaker": "You"}
+    agent = (agent or "hope").strip().lower()
+    if agent == "hope":
+        return {"is_user": False, "kind": "hope", "speaker": "HOPE"}
+    if agent == "atlas":
+        return {"is_user": False, "kind": "atlas", "speaker": "Atlas"}
+    return {"is_user": False, "kind": "subagent", "speaker": agent.capitalize()}
+
+
 def _headline(summary: str) -> str:
     """First sentence of the session summary, used as the thread's name.
 
@@ -251,21 +265,13 @@ class DashboardState(rx.State):
         component whether it is showing live turns or a stored transcript."""
         if self.is_live_selected:
             return [
-                {
-                    "key": f"live-{turn['seq']}",
-                    "is_user": turn["role"] == "user",
-                    "speaker": "You" if turn["role"] == "user" else (turn["agent"] or "HOPE").upper(),
-                    "text": turn["text"],
-                }
+                {"key": f"live-{turn['seq']}", **_speaker(turn["role"], turn["agent"]),
+                 "text": turn["text"]}
                 for turn in self.live_turns
             ]
         return [
-            {
-                "key": f"past-{i}",
-                "is_user": message["role"] == "user",
-                "speaker": "You" if message["role"] == "user" else message["agent"].upper(),
-                "text": message["text"],
-            }
+            {"key": f"past-{i}", **_speaker(message["role"], message["agent"]),
+             "text": message["text"]}
             for i, message in enumerate(self.transcript)
         ]
 

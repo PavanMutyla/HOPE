@@ -154,3 +154,19 @@ def test_bundle_exposes_summarizer_for_shutdown_flush(pipeline_mocks, hope_voice
     from core.voice.pipeline import build_pipeline
     bundle = build_pipeline(hope_voice_agent, [])
     assert bundle.summarizer is pipeline_mocks["ContextSummarizer"].return_value
+
+
+@pytest.mark.integration
+def test_live_user_tap_sits_before_the_user_aggregator(pipeline_mocks, hope_voice_agent):
+    """The user aggregator consumes transcriptions; a tap after it would show
+    the dashboard HOPE's replies and none of Pavan's."""
+    from pipecat.processors.aggregators.llm_response_universal import LLMUserAggregator
+
+    from core.voice.live_feed import LiveUserTap
+    from core.voice.pipeline import build_pipeline
+
+    build_pipeline(hope_voice_agent, [])
+    processors = pipeline_mocks["Pipeline"].call_args[0][0]
+    tap = next(i for i, p in enumerate(processors) if isinstance(p, LiveUserTap))
+    aggregator = next(i for i, p in enumerate(processors) if isinstance(p, LLMUserAggregator))
+    assert tap < aggregator
