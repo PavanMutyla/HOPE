@@ -15,8 +15,6 @@ class Settings(BaseSettings):
     )
 
     openai_api_key: str
-    cartesia_api_key: str
-    cartesia_voice_id: str
     user_name: str
     log_level: str
     stt_model: str
@@ -27,7 +25,6 @@ class Settings(BaseSettings):
     langfuse_base_url: str
     atlas_llm_model: str
     atlas_workspace: str
-    atlas_voice_id: str
     kokoro_voice_id: str = "af_heart"
     kokoro_atlas_voice_id: str = "af_bella"
     llm_context_limit: int = 128000  # fallback only; real window is looked up per-model via litellm
@@ -59,6 +56,19 @@ class Settings(BaseSettings):
     home_lon: float | None = None
     dashboard_autostart: bool = True
     hope_log_path: str = str(_REPO_ROOT / "data_store/logs/hope.log")
+    # ── Internet access (read-only) ──
+    # Search goes through a self-hosted meta-search engine, never a search
+    # vendor's API. "degoog" or "searxng" — see tools/web/search.py.
+    search_provider: str = "degoog"
+    degoog_url: str = "http://localhost:4444"
+    degoog_api_key: str = ""  # only if the instance protects /api/search
+    searxng_url: str = "http://localhost:8888"
+    # ── Dynamically spawned sub-agents ──
+    max_live_subagents: int = 5  # hard cap, enforced in code, not the prompt
+    research_llm_model: str = "gpt-4o-mini"
+    research_max_researchers: int = 4
+    research_max_tool_calls: int = 12  # per researcher
+    research_dir: str = str(_REPO_ROOT / "data_store/research")
 
 
 settings = Settings()

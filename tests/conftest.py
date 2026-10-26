@@ -31,8 +31,6 @@ def pytest_configure(config):
     """
     defaults = {
         "OPENAI_API_KEY": "test-openai-key-not-real",
-        "CARTESIA_API_KEY": "test-cartesia-key-not-real",
-        "CARTESIA_VOICE_ID": "test-cartesia-voice-id",
         "USER_NAME": "TestUser",
         "LOG_LEVEL": "INFO",
         "STT_MODEL": "whisper-1",
@@ -43,7 +41,6 @@ def pytest_configure(config):
         "LANGFUSE_BASE_URL": "https://cloud.langfuse.com",
         "ATLAS_LLM_MODEL": "gpt-4o-mini",
         "ATLAS_WORKSPACE": "/tmp/test-atlas-workspace",
-        "ATLAS_VOICE_ID": "test-atlas-voice-id",
         "KOKORO_VOICE_ID": "af_heart",
         "KOKORO_ATLAS_VOICE_ID": "af_bella",
     }
@@ -63,6 +60,8 @@ def pytest_configure(config):
     os.environ["EPISODIC_DB_PATH"] = str(Path(scratch) / "episodic.db")
     os.environ["EPISODIC_MEDIA_DIR"] = str(Path(scratch) / "media")
     os.environ["CHROMA_PERSIST_DIR"] = str(Path(scratch) / "chroma")
+    os.environ["BLACKBOARD_DB_PATH"] = str(Path(scratch) / "blackboard.db")
+    os.environ["RESEARCH_DIR"] = str(Path(scratch) / "research")
 
     # The Reflex app is its own package rooted at dashboard/, outside the paths
     # pytest adds for the repo itself. Without this, `import dashboard.state`
@@ -85,8 +84,6 @@ def fake_env(monkeypatch):
     will surface as a ValidationError, which is the intended failure mode.
     """
     monkeypatch.setenv("OPENAI_API_KEY", "test-openai-key-not-real")
-    monkeypatch.setenv("CARTESIA_API_KEY", "test-cartesia-key-not-real")
-    monkeypatch.setenv("CARTESIA_VOICE_ID", "test-cartesia-voice-id")
     monkeypatch.setenv("USER_NAME", "TestUser")
     monkeypatch.setenv("LOG_LEVEL", "INFO")
     monkeypatch.setenv("STT_MODEL", "whisper-1")
@@ -97,7 +94,6 @@ def fake_env(monkeypatch):
     monkeypatch.setenv("LANGFUSE_BASE_URL", "https://cloud.langfuse.com")
     monkeypatch.setenv("ATLAS_LLM_MODEL", "gpt-4o-mini")
     monkeypatch.setenv("ATLAS_WORKSPACE", "/tmp/test-atlas-workspace")
-    monkeypatch.setenv("ATLAS_VOICE_ID", "test-atlas-voice-id")
     monkeypatch.setenv("KOKORO_VOICE_ID", "af_heart")
     monkeypatch.setenv("KOKORO_ATLAS_VOICE_ID", "af_bella")
 
