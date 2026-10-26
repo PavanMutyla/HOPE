@@ -15,6 +15,7 @@ from core.voice.agent import VoiceAgent
 from memory.episodic_memory.store import EpisodicMemory
 from memory.semantic_memory.store import SemanticMemory
 from settings import settings
+from tools.tool_log import brief_args
 
 _TOOL_DISPATCH: dict[str, Callable] = {
     "read_file": fs.read_file,
@@ -179,6 +180,7 @@ class Atlas:
         fn = _TOOL_DISPATCH.get(name)
         if fn is None:
             return f"Unknown tool: {name}"
+        logger.info(f"[tool] atlas (background) → {name}({brief_args(args)})")
 
         try:
             return await fn(self._workspace, **args)

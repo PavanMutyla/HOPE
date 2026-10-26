@@ -1,4 +1,8 @@
 import asyncio
+import dataclasses
+import time
+
+from loguru import logger
 
 
 from pipecat.frames.frames import FunctionCallResultProperties
@@ -13,6 +17,7 @@ from core.voice.orchestrator import VoiceOrchestrator
 from core.voice.team_state import team_state
 from memory.board import live as board_live
 from sub_agents.research.deep_research import DeepResearch
+from tools.tool_log import brief_args
 from tools.web import fetch
 from tools.web.fetch import FetchBlocked, as_untrusted
 from tools.web.search import SearchError, SearchProvider
@@ -777,11 +782,14 @@ async def get_weather_handler(params: FunctionCallParams) -> None:
 def _make_search_web_handler(search_provider: SearchProvider):
     async def handler(params: FunctionCallParams) -> None:
         args = SearchWebArgs(**params.arguments)
+        logger.info(f'[web] {agent_state.active} searching: "{args.query}"')
         try:
             results = await search_provider.search(args.query, 5)
         except SearchError as exc:
+            logger.warning(f"[web] search failed: {exc}")
             await params.result_callback(str(exc))
             return
+        logger.info(f"[web] got {len(results)} results")
         if not results:
             await params.result_callback("No results.")
             return
@@ -792,14 +800,18 @@ def _make_search_web_handler(search_provider: SearchProvider):
 
 async def read_webpage_handler(params: FunctionCallParams) -> None:
     args = ReadWebpageArgs(**params.arguments)
+    logger.info(f"[web] {agent_state.active} reading: {args.url}")
     try:
         page = await fetch.read_url(args.url)
     except FetchBlocked as exc:
+        logger.warning(f"[web] blocked: {exc}")
         await params.result_callback(str(exc))
         return
     except Exception as exc:
+        logger.warning(f"[web] couldn't read {args.url}: {exc}")
         await params.result_callback(f"Couldn't read {args.url}: {exc}")
         return
+    logger.info(f'[web] read "{page.title}" ({len(page.text)} chars)')
     text = page.text[:_HOPE_PAGE_CHARS] or "(no readable text)"
     await params.result_callback(as_untrusted(page.url, f"Title: {page.title}\n\n{text}"))
 
@@ -889,6 +901,28 @@ def _guarded(name: str, handler, manager: SubAgentManager | None):
     return wrapped
 
 
+def _logged(name: str, handler):
+    """One "[tool]" line when a tool is called and one when it answers —
+    the dashboard's Tools card is a filter over exactly these lines."""
+    async def wrapped(params: FunctionCallParams) -> None:
+        logger.info(f"[tool] {agent_state.active} → {name}({brief_args(params.arguments)})")
+        started = time.monotonic()
+
+        async def result_callback(result, *args, **kwargs):
+            logger.info(
+                f"[tool] {name} answered in {time.monotonic() - started:.1f}s "
+                f"({len(str(result))} chars)"
+            )
+            await params.result_callback(result, *args, **kwargs)
+
+        try:
+            await handler(dataclasses.replace(params, result_callback=result_callback))
+        except Exception:
+            logger.exception(f"[tool] {name} failed")
+            raise
+    return wrapped
+
+
 # ── Wiring ────────────────────────────────────────────────────────────────────
 
 def setup(
@@ -944,4 +978,6 @@ def setup(
 
     llm = orchestrator.bundle.llm
     for name, handler in handlers.items():
-        llm.register_function(name, _guarded(name, handler, manager), cancel_on_interruption=False)
+        llm.register_function(
+            name, _logged(name, _guarded(name, handler, manager)), cancel_on_interruption=False
+        )
