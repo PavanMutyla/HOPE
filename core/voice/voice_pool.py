@@ -22,20 +22,22 @@ class PooledVoice:
     spoken_name: str
 
 
-# Best first. Every entry is in the stock voices-v1.0.bin.
+# Best first, alternating female and male. Every entry is in the stock
+# voices-v1.0.bin. af_nicole is left out on purpose: its whispery, breathy
+# delivery is wrong for a research assistant, and Pavan asked for it gone.
 POOL: tuple[PooledVoice, ...] = (
-    PooledVoice("af_nicole", "Nicole"),
+    PooledVoice("af_sarah", "Sarah"),
     PooledVoice("am_michael", "Michael"),
     PooledVoice("bf_emma", "Emma"),
     PooledVoice("am_fenrir", "Fenrir"),
-    PooledVoice("af_sarah", "Sarah"),
-    PooledVoice("am_puck", "Puck"),
     PooledVoice("af_kore", "Kore"),
-    PooledVoice("bm_george", "George"),
+    PooledVoice("am_puck", "Puck"),
     PooledVoice("af_aoede", "Aoede"),
-    PooledVoice("bm_fable", "Fable"),
+    PooledVoice("bm_george", "George"),
     PooledVoice("bf_isabella", "Isabella"),
+    PooledVoice("bm_fable", "Fable"),
     PooledVoice("af_nova", "Nova"),
+    PooledVoice("af_alloy", "Alloy"),
 )
 
 
