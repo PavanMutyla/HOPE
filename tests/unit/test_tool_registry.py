@@ -5,7 +5,7 @@ from tools.registry import (
     ALL_SCHEMAS,
     check_plans_schema,
     claim_task_schema,
-    connect_to_atlas_schema,
+    connect_to_agent_schema,
     consult_agents_schema,
     delegate_to_atlas_schema,
     disable_team_mode_schema,
@@ -25,8 +25,8 @@ from tools.registry import (
 
 
 @pytest.mark.unit
-def test_all_schemas_contains_exactly_twenty_seven_tools():
-    assert len(ALL_SCHEMAS) == 27
+def test_all_schemas_contains_exactly_thirty_three_tools():
+    assert len(ALL_SCHEMAS) == 33
 
 
 @pytest.mark.unit
@@ -34,7 +34,7 @@ def test_all_schemas_names_are_correct():
     names = {s.name for s in ALL_SCHEMAS}
     assert names == {
         "delegate_to_atlas",
-        "connect_to_atlas",
+        "connect_to_agent",
         "handback_to_hope",
         "recall_memory",
         "recall_semantic",
@@ -60,6 +60,12 @@ def test_all_schemas_names_are_correct():
         "update_quick_note",
         "get_location_and_time",
         "get_weather",
+        "search_web",
+        "read_webpage",
+        "start_deep_research",
+        "research_status",
+        "list_subagents",
+        "retire_subagent",
     }
 
 
@@ -92,8 +98,8 @@ def test_delegate_schema_task_property_is_string_type():
 
 
 @pytest.mark.unit
-def test_connect_schema_has_no_required_parameters():
-    assert connect_to_atlas_schema.required == []
+def test_connect_schema_requires_agent_name():
+    assert connect_to_agent_schema.required == ["name"]
 
 
 @pytest.mark.unit
@@ -108,8 +114,9 @@ def test_delegate_schema_description_mentions_filesystem():
 
 
 @pytest.mark.unit
-def test_connect_schema_description_mentions_atlas():
-    assert "Atlas" in connect_to_atlas_schema.description
+def test_connect_schema_description_mentions_atlas_and_researchers():
+    assert "Atlas" in connect_to_agent_schema.description
+    assert "researcher" in connect_to_agent_schema.description
 
 
 @pytest.mark.unit

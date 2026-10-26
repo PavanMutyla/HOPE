@@ -29,8 +29,13 @@ class DelegateToAtlasArgs(BaseModel):
     task: str = Field(description="Natural language description of the filesystem task.")
 
 
-class ConnectToAtlasArgs(BaseModel):
-    pass
+class ConnectToAgentArgs(BaseModel):
+    name: str = Field(
+        description=(
+            "Who Pavan wants to talk to — 'atlas', or a researcher's spoken name "
+            "like 'Emma' (see list_subagents)."
+        )
+    )
 
 
 class HandbackToHopeArgs(BaseModel):
@@ -183,3 +188,29 @@ class GetLocationAndTimeArgs(BaseModel):
 
 class GetWeatherArgs(BaseModel):
     pass
+
+
+class SearchWebArgs(BaseModel):
+    query: str = Field(description="What to search the web for.")
+
+
+class ReadWebpageArgs(BaseModel):
+    url: str = Field(description="The http(s) URL of a public web page to read.")
+
+
+class StartDeepResearchArgs(BaseModel):
+    question: str = Field(
+        description="The research question, in full, including any scope Pavan gave."
+    )
+
+
+class ResearchStatusArgs(BaseModel):
+    pass
+
+
+class ListSubagentsArgs(BaseModel):
+    pass
+
+
+class RetireSubagentArgs(BaseModel):
+    name: str = Field(description="The sub-agent's spoken name, e.g. 'Emma'.")

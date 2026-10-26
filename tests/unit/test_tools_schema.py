@@ -5,7 +5,7 @@ from pydantic import ValidationError
 
 from tools.schema import (
     CheckPlansArgs,
-    ConnectToAtlasArgs,
+    HandbackToHopeArgs,
     ConsultAgentsArgs,
     DelegateToAtlasArgs,
     RecallMemoryArgs,
@@ -25,7 +25,7 @@ def test_function_schema_maps_required_field_properties():
 
 @pytest.mark.unit
 def test_function_schema_empty_model_has_no_required_fields():
-    schema = function_schema("connect_to_atlas", "desc", ConnectToAtlasArgs)
+    schema = function_schema("handback_to_hope", "desc", HandbackToHopeArgs)
     assert schema.properties == {}
     assert schema.required == []
 

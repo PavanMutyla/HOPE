@@ -7,15 +7,20 @@ from pipecat.services.llm_service import FunctionCallParams
 from sub_agents.atlas.agent import Atlas
 
 
+from core.agents.manager import SubAgentManager
 from core.voice.agent_state import agent_state
 from core.voice.orchestrator import VoiceOrchestrator
 from core.voice.team_state import team_state
 from memory.board import live as board_live
+from sub_agents.research.deep_research import DeepResearch
+from tools.web import fetch
+from tools.web.fetch import FetchBlocked, as_untrusted
+from tools.web.search import SearchError, SearchProvider
 from tools.schema import (
     AddTaskArgs,
     CheckPlansArgs,
     ClaimTaskArgs,
-    ConnectToAtlasArgs,
+    ConnectToAgentArgs,
     ConsultAgentsArgs,
     DelegateToAtlasArgs,
     DeleteTaskArgs,
@@ -28,13 +33,19 @@ from tools.schema import (
     GetTasksArgs,
     GetWeatherArgs,
     HandbackToHopeArgs,
+    ListSubagentsArgs,
     PostTaskArgs,
+    ReadWebpageArgs,
     RecallMemoryArgs,
     RecallProcedureArgs,
     RecallSemanticArgs,
     RecordProcedureOutcomeArgs,
+    ResearchStatusArgs,
+    RetireSubagentArgs,
     SaveProcedureArgs,
+    SearchWebArgs,
     SendSignalArgs,
+    StartDeepResearchArgs,
     ToggleTaskArgs,
     UpdateQuickNoteArgs,
     UpdateTaskArgs,
@@ -56,20 +67,22 @@ delegate_to_atlas_schema = function_schema(
     DelegateToAtlasArgs,
 )
 
-connect_to_atlas_schema = function_schema(
-    "connect_to_atlas",
+connect_to_agent_schema = function_schema(
+    "connect_to_agent",
     (
-        "Switch the active voice to Atlas so Pavan can speak directly with Atlas. "
-        "Use when Pavan says 'connect me to Atlas', 'let me talk to Atlas', or similar."
+        "Switch the active voice to another agent so Pavan can speak with it directly — "
+        "Atlas, or any live researcher by its spoken name. Use when Pavan says "
+        "'connect me to Atlas', 'let me talk to Emma', or similar."
     ),
-    ConnectToAtlasArgs,
+    ConnectToAgentArgs,
 )
 
 handback_to_hope_schema = function_schema(
     "handback_to_hope",
     (
         "Hand the active voice back to HOPE. "
-        "Use when Pavan says 'HOPE take over', 'back to HOPE', 'thanks Atlas', or similar."
+        "Use when Pavan says 'HOPE take over', 'back to HOPE', 'thanks Atlas', 'thanks Emma', "
+        "or similar."
     ),
     HandbackToHopeArgs,
 )
@@ -283,9 +296,56 @@ get_weather_schema = function_schema(
     GetWeatherArgs,
 )
 
+search_web_schema = function_schema(
+    "search_web",
+    (
+        "Search the web for a quick fact or a current answer. For anything that needs "
+        "several sources compared, use start_deep_research instead."
+    ),
+    SearchWebArgs,
+)
+
+read_webpage_schema = function_schema(
+    "read_webpage",
+    "Read the main text of one public web page, e.g. a result from search_web.",
+    ReadWebpageArgs,
+)
+
+start_deep_research_schema = function_schema(
+    "start_deep_research",
+    (
+        "Start a deep research run in the background: researchers, each with their own "
+        "voice, search the web in parallel and a cited report comes back. Use when Pavan "
+        "asks you to research, investigate, or compare something properly. Takes a few "
+        "minutes; keep talking with Pavan meanwhile."
+    ),
+    StartDeepResearchArgs,
+)
+
+research_status_schema = function_schema(
+    "research_status",
+    "Check how the current or most recent deep research run is going.",
+    ResearchStatusArgs,
+)
+
+list_subagents_schema = function_schema(
+    "list_subagents",
+    "List the sub-agents that exist right now — their names, what they're on, and status.",
+    ListSubagentsArgs,
+)
+
+retire_subagent_schema = function_schema(
+    "retire_subagent",
+    (
+        "Dismiss a sub-agent Pavan no longer needs, freeing its voice. Stops it if it's "
+        "still working."
+    ),
+    RetireSubagentArgs,
+)
+
 ALL_SCHEMAS = [
     delegate_to_atlas_schema,
-    connect_to_atlas_schema,
+    connect_to_agent_schema,
     handback_to_hope_schema,
     recall_memory_schema,
     recall_semantic_schema,
@@ -311,7 +371,26 @@ ALL_SCHEMAS = [
     update_quick_note_schema,
     get_location_and_time_schema,
     get_weather_schema,
+    search_web_schema,
+    read_webpage_schema,
+    start_deep_research_schema,
+    research_status_schema,
+    list_subagents_schema,
+    retire_subagent_schema,
 ]
+
+# What a connected sub-agent may call while it holds the shared pipeline. The
+# researcher voice prompt only ever needs to hand back, but its context holds
+# web-derived findings — so this is enforced in code (see _guarded), not left
+# to the prompt: a page that talked the model into delegate_to_atlas or
+# update_quick_note gets refused here.
+SUBAGENT_VOICE_TOOLS = frozenset({
+    "handback_to_hope", "connect_to_agent", "list_subagents", "research_status",
+})
+
+# HOPE's own reads are capped well below the researchers' — this text lands in
+# the live voice context, which every following turn pays for.
+_HOPE_PAGE_CHARS = 6000
 
 # ── Handlers ──────────────────────────────────────────────────────────────────
 
@@ -326,9 +405,15 @@ async def delegate_to_atlas_handler(params: FunctionCallParams) -> None:
 
 def _make_connect_handler(orchestrator: "VoiceOrchestrator"):
     async def handler(params: FunctionCallParams) -> None:
-        ConnectToAtlasArgs(**params.arguments)
-        await orchestrator.switch_to("atlas")
-        await params.result_callback("Connecting you to Atlas now.")
+        args = ConnectToAgentArgs(**params.arguments)
+        agent = orchestrator.find_agent(args.name)
+        if agent is None:
+            await params.result_callback(
+                f"There's no agent called {args.name} right now — check list_subagents."
+            )
+            return
+        await orchestrator.switch_to(agent.name)
+        await params.result_callback(f"Connecting you to {agent.spoken_name or agent.name.title()} now.")
     return handler
 
 
@@ -689,143 +774,174 @@ async def get_weather_handler(params: FunctionCallParams) -> None:
     )
 
 
+def _make_search_web_handler(search_provider: SearchProvider):
+    async def handler(params: FunctionCallParams) -> None:
+        args = SearchWebArgs(**params.arguments)
+        try:
+            results = await search_provider.search(args.query, 5)
+        except SearchError as exc:
+            await params.result_callback(str(exc))
+            return
+        if not results:
+            await params.result_callback("No results.")
+            return
+        lines = [f"- {r.title} ({r.url}): {r.snippet}" for r in results]
+        await params.result_callback(as_untrusted(f"search: {args.query}", "\n".join(lines)))
+    return handler
+
+
+async def read_webpage_handler(params: FunctionCallParams) -> None:
+    args = ReadWebpageArgs(**params.arguments)
+    try:
+        page = await fetch.read_url(args.url)
+    except FetchBlocked as exc:
+        await params.result_callback(str(exc))
+        return
+    except Exception as exc:
+        await params.result_callback(f"Couldn't read {args.url}: {exc}")
+        return
+    text = page.text[:_HOPE_PAGE_CHARS] or "(no readable text)"
+    await params.result_callback(as_untrusted(page.url, f"Title: {page.title}\n\n{text}"))
+
+
+def _make_start_deep_research_handler(research: DeepResearch):
+    async def handler(params: FunctionCallParams) -> None:
+        args = StartDeepResearchArgs(**params.arguments)
+        if research.busy:
+            await params.result_callback(
+                "A research run is already going — I'll report back when it's done."
+            )
+            return
+        await params.result_callback(
+            "Research started. Researchers are being spawned.",
+            properties=FunctionCallResultProperties(is_final=False),
+        )
+        asyncio.create_task(research.run(args.question, params.result_callback))
+    return handler
+
+
+def _make_research_status_handler(orchestrator: "VoiceOrchestrator", research: DeepResearch, manager: SubAgentManager):
+    async def handler(params: FunctionCallParams) -> None:
+        ResearchStatusArgs(**params.arguments)
+        blackboard = orchestrator.bundle.blackboard
+        if research.current_run_id:
+            run = await asyncio.to_thread(blackboard.get_run, research.current_run_id)
+        else:
+            runs = await asyncio.to_thread(blackboard.list_runs, 1)
+            run = runs[0] if runs else None
+        if run is None:
+            await params.result_callback("No research has been run yet.")
+            return
+        sources = await asyncio.to_thread(blackboard.list_sources, run.run_id)
+        lines = [f"Research on '{run.question}' is {run.status}, {len(sources)} pages read so far."]
+        lines += [
+            f"- {live.spoken_name}: {live.status} — {live.spec.objective}"
+            for live in manager.live()
+        ]
+        if run.report_path:
+            lines.append(f"Report: {run.report_path}")
+        await params.result_callback("\n".join(lines))
+    return handler
+
+
+def _make_list_subagents_handler(manager: SubAgentManager):
+    async def handler(params: FunctionCallParams) -> None:
+        ListSubagentsArgs(**params.arguments)
+        live = manager.live()
+        if not live:
+            await params.result_callback("No sub-agents right now.")
+            return
+        lines = [
+            f"- {agent.spoken_name} ({agent.spec.template}, {agent.status}): {agent.spec.objective}"
+            for agent in live
+        ]
+        await params.result_callback("\n".join(lines))
+    return handler
+
+
+def _make_retire_subagent_handler(orchestrator: "VoiceOrchestrator", manager: SubAgentManager):
+    async def handler(params: FunctionCallParams) -> None:
+        args = RetireSubagentArgs(**params.arguments)
+        live = manager.find(args.name)
+        if live is None:
+            await params.result_callback(f"There's no sub-agent called {args.name}.")
+            return
+        if agent_state.active == live.name:
+            await orchestrator.switch_to("hope")
+        await manager.retire(live.name)
+        await params.result_callback(f"{live.spoken_name} has been dismissed.")
+    return handler
+
+
+def _guarded(name: str, handler, manager: SubAgentManager | None):
+    """Refuse anything outside SUBAGENT_VOICE_TOOLS while a sub-agent holds the
+    shared pipeline. Atlas and HOPE are unaffected."""
+    if manager is None or name in SUBAGENT_VOICE_TOOLS:
+        return handler
+
+    async def wrapped(params: FunctionCallParams) -> None:
+        if manager.is_subagent(agent_state.active):
+            await params.result_callback(
+                f"{name} isn't available to a researcher — hand back to HOPE for that."
+            )
+            return
+        await handler(params)
+    return wrapped
+
+
 # ── Wiring ────────────────────────────────────────────────────────────────────
 
-def setup(orchestrator: "VoiceOrchestrator") -> None:
-    """Register all tools on HOPE's LLM. Called once from hope.py after orchestrator is created."""
+def setup(
+    orchestrator: "VoiceOrchestrator",
+    manager: SubAgentManager | None = None,
+    research: DeepResearch | None = None,
+    search_provider: SearchProvider | None = None,
+) -> None:
+    """Register all tools on HOPE's LLM. Called once from hope.py after orchestrator is created.
+
+    The sub-agent and internet tools are only registered when their
+    collaborators are passed — their schemas are still in ALL_SCHEMAS, and an
+    unregistered call fails visibly rather than silently doing nothing.
+    """
+    handlers = {
+        "delegate_to_atlas": delegate_to_atlas_handler,
+        "connect_to_agent": _make_connect_handler(orchestrator),
+        "handback_to_hope": _make_handback_handler(orchestrator),
+        "recall_memory": _make_recall_memory_handler(orchestrator),
+        "recall_semantic": _make_recall_semantic_handler(orchestrator),
+        "save_procedure": _make_save_procedure_handler(orchestrator),
+        "recall_procedure": _make_recall_procedure_handler(orchestrator),
+        "record_procedure_outcome": _make_record_procedure_outcome_handler(orchestrator),
+        "check_plans": _make_check_plans_handler(orchestrator),
+        "consult_agents": _make_consult_agents_handler(orchestrator),
+        "enable_team_mode": enable_team_mode_handler,
+        "disable_team_mode": disable_team_mode_handler,
+        "post_task": _make_post_task_handler(orchestrator),
+        "claim_task": _make_claim_task_handler(orchestrator),
+        "update_task_status": _make_update_task_status_handler(orchestrator),
+        "get_active_tasks": _make_get_active_tasks_handler(orchestrator),
+        "send_signal": _make_send_signal_handler(orchestrator),
+        "get_signals": _make_get_signals_handler(orchestrator),
+        "add_task": _make_add_task_handler(orchestrator),
+        "update_task": _make_update_task_handler(orchestrator),
+        "toggle_task": _make_toggle_task_handler(orchestrator),
+        "delete_task": _make_delete_task_handler(orchestrator),
+        "get_tasks": _make_get_tasks_handler(orchestrator),
+        "get_quick_note": _make_get_quick_note_handler(orchestrator),
+        "update_quick_note": _make_update_quick_note_handler(orchestrator),
+        "get_location_and_time": get_location_and_time_handler,
+        "get_weather": get_weather_handler,
+        "read_webpage": read_webpage_handler,
+    }
+    if search_provider is not None:
+        handlers["search_web"] = _make_search_web_handler(search_provider)
+    if manager is not None:
+        handlers["list_subagents"] = _make_list_subagents_handler(manager)
+        handlers["retire_subagent"] = _make_retire_subagent_handler(orchestrator, manager)
+    if manager is not None and research is not None:
+        handlers["start_deep_research"] = _make_start_deep_research_handler(research)
+        handlers["research_status"] = _make_research_status_handler(orchestrator, research, manager)
+
     llm = orchestrator.bundle.llm
-    llm.register_function(
-        "delegate_to_atlas",
-        delegate_to_atlas_handler,
-        cancel_on_interruption=False,
-    )
-    llm.register_function(
-        "connect_to_atlas",
-        _make_connect_handler(orchestrator),
-        cancel_on_interruption=False,
-    )
-    llm.register_function(
-        "handback_to_hope",
-        _make_handback_handler(orchestrator),
-        cancel_on_interruption=False,
-    )
-    llm.register_function(
-        "recall_memory",
-        _make_recall_memory_handler(orchestrator),
-        cancel_on_interruption=False,
-    )
-    llm.register_function(
-        "recall_semantic",
-        _make_recall_semantic_handler(orchestrator),
-        cancel_on_interruption=False,
-    )
-    llm.register_function(
-        "save_procedure",
-        _make_save_procedure_handler(orchestrator),
-        cancel_on_interruption=False,
-    )
-    llm.register_function(
-        "recall_procedure",
-        _make_recall_procedure_handler(orchestrator),
-        cancel_on_interruption=False,
-    )
-    llm.register_function(
-        "record_procedure_outcome",
-        _make_record_procedure_outcome_handler(orchestrator),
-        cancel_on_interruption=False,
-    )
-    llm.register_function(
-        "check_plans",
-        _make_check_plans_handler(orchestrator),
-        cancel_on_interruption=False,
-    )
-    llm.register_function(
-        "consult_agents",
-        _make_consult_agents_handler(orchestrator),
-        cancel_on_interruption=False,
-    )
-    llm.register_function(
-        "enable_team_mode",
-        enable_team_mode_handler,
-        cancel_on_interruption=False,
-    )
-    llm.register_function(
-        "disable_team_mode",
-        disable_team_mode_handler,
-        cancel_on_interruption=False,
-    )
-    llm.register_function(
-        "post_task",
-        _make_post_task_handler(orchestrator),
-        cancel_on_interruption=False,
-    )
-    llm.register_function(
-        "claim_task",
-        _make_claim_task_handler(orchestrator),
-        cancel_on_interruption=False,
-    )
-    llm.register_function(
-        "update_task_status",
-        _make_update_task_status_handler(orchestrator),
-        cancel_on_interruption=False,
-    )
-    llm.register_function(
-        "get_active_tasks",
-        _make_get_active_tasks_handler(orchestrator),
-        cancel_on_interruption=False,
-    )
-    llm.register_function(
-        "send_signal",
-        _make_send_signal_handler(orchestrator),
-        cancel_on_interruption=False,
-    )
-    llm.register_function(
-        "get_signals",
-        _make_get_signals_handler(orchestrator),
-        cancel_on_interruption=False,
-    )
-    llm.register_function(
-        "add_task",
-        _make_add_task_handler(orchestrator),
-        cancel_on_interruption=False,
-    )
-    llm.register_function(
-        "update_task",
-        _make_update_task_handler(orchestrator),
-        cancel_on_interruption=False,
-    )
-    llm.register_function(
-        "toggle_task",
-        _make_toggle_task_handler(orchestrator),
-        cancel_on_interruption=False,
-    )
-    llm.register_function(
-        "delete_task",
-        _make_delete_task_handler(orchestrator),
-        cancel_on_interruption=False,
-    )
-    llm.register_function(
-        "get_tasks",
-        _make_get_tasks_handler(orchestrator),
-        cancel_on_interruption=False,
-    )
-    llm.register_function(
-        "get_quick_note",
-        _make_get_quick_note_handler(orchestrator),
-        cancel_on_interruption=False,
-    )
-    llm.register_function(
-        "update_quick_note",
-        _make_update_quick_note_handler(orchestrator),
-        cancel_on_interruption=False,
-    )
-    llm.register_function(
-        "get_location_and_time",
-        get_location_and_time_handler,
-        cancel_on_interruption=False,
-    )
-    llm.register_function(
-        "get_weather",
-        get_weather_handler,
-        cancel_on_interruption=False,
-    )
+    for name, handler in handlers.items():
+        llm.register_function(name, _guarded(name, handler, manager), cancel_on_interruption=False)
