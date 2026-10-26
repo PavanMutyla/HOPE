@@ -433,7 +433,12 @@ def _make_handback_handler(orchestrator: "VoiceOrchestrator"):
 def _make_recall_memory_handler(orchestrator: "VoiceOrchestrator"):
     async def handler(params: FunctionCallParams) -> None:
         args = RecallMemoryArgs(**params.arguments)
-        agent_name = args.agent_name or agent_state.active
+        # HOPE defaults to everyone's history: it owns the conversation and
+        # hands work to the others, so "did I ask about X?" has to reach
+        # Atlas's tasks and research runs too. Everyone else defaults to
+        # their own.
+        default = "all" if agent_state.active == "hope" else agent_state.active
+        agent_name = args.agent_name or default
         agent = None if agent_name == "all" else agent_name
 
         episodes = await asyncio.to_thread(

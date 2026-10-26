@@ -231,3 +231,75 @@ async def test_fold_write_actually_crosses_a_thread_boundary(memory, monkeypatch
 
     assert seen, "write() was never called"
     assert main_thread not in seen, "episodic write ran on the event loop thread"
+
+
+# ── who owns a session, and what gets summarized ────────────────
+
+WARM_START = {
+    "role": "developer",
+    "content": "Summary of your most recent session with Pavan (for context — don't "
+               "repeat it verbatim): Pavan activated team mode and tried to contact Suresh.",
+}
+GREETING = {"role": "developer", "content": "Say a short hello to Pavan."}
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("active", ["atlas", "sarah"])
+async def test_session_is_saved_under_hope_whoever_was_talking_at_the_end(memory, active):
+    """The Python session was filed under "atlas" because Pavan was connected
+    to Atlas when he quit, which hid it from HOPE's recall and warm start."""
+    from core.voice.agent_state import agent_state
+
+    agent_state.active = active
+    try:
+        summarizer = _summarizer(_Ctx(_conversation()), memory)
+        await summarizer._summarize()
+        await summarizer.flush()
+    finally:
+        agent_state.active = "hope"
+
+    agents = {e.agent for r in ("threshold", "session_end_raw") for e in memory.list_by_reason(r)}
+    assert agents == {"hope"}
+
+
+@pytest.mark.integration
+async def test_a_run_where_pavan_never_spoke_is_not_saved(memory):
+    """HOPE's hello and nothing else must not become "the latest session"."""
+    context = _Ctx([
+        {"role": "system", "content": "You are HOPE."},
+        WARM_START,
+        GREETING,
+        {"role": "assistant", "content": "Hey Pavan, what's on your mind today?"},
+    ])
+    await _summarizer(context, memory).flush()
+    assert memory.list_by_reason("session_end_raw") == []
+
+
+@pytest.mark.integration
+async def test_upgrade_never_shows_the_summarizer_last_sessions_recap(memory):
+    """The session-end summary is written at the next startup from the raw
+    rows; the warm-start recap stored among them must not reach the LLM, or
+    it gets copied into this session's summary and on into every next one."""
+    from core.voice.summarizer import upgrade_pending_episodes
+
+    context = _Ctx([
+        {"role": "system", "content": "You are HOPE."},
+        WARM_START,
+        GREETING,
+        {"role": "assistant", "content": "Hey Pavan."},
+        {"role": "user", "content": "What is the latest Python version?"},
+        {"role": "assistant", "content": "Python 3.15."},
+    ])
+    await _summarizer(context, memory).flush()
+
+    client = AsyncMock()
+    client.chat.completions.create.return_value = MagicMock(
+        choices=[MagicMock(message=MagicMock(content="Pavan asked about Python 3.15."))]
+    )
+    await upgrade_pending_episodes(memory, client, MagicMock())
+
+    transcript = client.chat.completions.create.call_args.kwargs["messages"][1]["content"]
+    assert "latest Python version" in transcript
+    assert "Suresh" not in transcript and "short hello" not in transcript
+    (episode,) = memory.list_by_reason("session_end")
+    assert (episode.agent, episode.summary) == ("hope", "Pavan asked about Python 3.15.")

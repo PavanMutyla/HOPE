@@ -10,7 +10,6 @@ from pipecat.frames.frames import MetricsFrame, TextFrame
 from pipecat.metrics.metrics import LLMTokenUsage, LLMUsageMetricsData, TTFBMetricsData
 from pipecat.processors.frame_processor import FrameDirection
 
-from core.voice.agent_state import agent_state
 from core.voice.context_meter import ContextMeter
 from core.voice.summarizer import (
     UNSUMMARIZED_MARKER,
@@ -234,7 +233,7 @@ async def test_successful_summarize_writes_episodic_memory():
     await summarizer._summary_task
 
     episodic_memory.write.assert_called_once_with(
-        agent=agent_state.active,
+        agent="hope",  # the session's owner, never the active agent
         session_id=TEST_SESSION_ID,
         reason="threshold",
         span_turns=6,  # len(expected_head) — folded head, before the keep_recent=4 tail
@@ -264,7 +263,7 @@ async def test_successful_summarize_writes_semantic_memory():
     summarizer._handle_metrics(make_usage_frame(900, 50))
     await summarizer._summary_task
 
-    semantic_memory.add.assert_called_once_with(agent=agent_state.active, text="compressed history")
+    semantic_memory.add.assert_called_once_with(agent="hope", text="compressed history")
 
 
 @pytest.mark.unit
@@ -562,7 +561,7 @@ async def test_flush_writes_raw_archive_tagged_session_end_raw():
 
     episodic_memory.write.assert_called_once()
     call_kwargs = episodic_memory.write.call_args.kwargs
-    assert call_kwargs["agent"] == agent_state.active
+    assert call_kwargs["agent"] == "hope"
     assert call_kwargs["session_id"] == TEST_SESSION_ID
     assert call_kwargs["reason"] == "session_end_raw"
     assert call_kwargs["span_turns"] == 2
@@ -749,3 +748,36 @@ async def test_inject_warm_start_lookup_failure_does_not_raise_or_add_message():
     await inject_warm_start(episodic_memory, context, agent="hope")  # must not raise
 
     context.add_message.assert_not_called()
+
+
+@pytest.mark.unit
+def test_summarizable_drops_scaffolding_but_keeps_this_sessions_fold():
+    from core.voice.summarizer import FOLD_SUMMARY_PREFIX, summarizable
+
+    fold = {"role": "developer", "content": f"{FOLD_SUMMARY_PREFIX}Pavan asked about Python."}
+    messages = [
+        {"role": "developer", "content": "Summary of your most recent session with Pavan: Suresh."},
+        {"role": "developer", "content": "Say a short hello to Pavan."},
+        fold,
+        {"role": "user", "content": "and the GIL?"},
+        {"role": "assistant", "content": "Still there by default."},
+    ]
+    assert summarizable(messages) == messages[2:]
+
+
+@pytest.mark.unit
+def test_build_summary_request_leaves_out_the_warm_start_recap():
+    request = build_summary_request([
+        {"role": "developer", "content": "Summary of your most recent session with Pavan: Suresh."},
+        {"role": "user", "content": "What is the latest Python version?"},
+    ])
+    assert "Suresh" not in request[1]["content"]
+    assert "latest Python version" in request[1]["content"]
+
+
+@pytest.mark.unit
+def test_a_fold_is_recognised_as_this_sessions_own_content():
+    from core.voice.summarizer import FOLD_SUMMARY_PREFIX
+
+    rebuilt = rebuild_context([], "the summary", [])
+    assert rebuilt[0]["content"] == f"{FOLD_SUMMARY_PREFIX}the summary"

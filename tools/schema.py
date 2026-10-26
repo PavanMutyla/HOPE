@@ -47,8 +47,9 @@ class RecallMemoryArgs(BaseModel):
     agent_name: str | None = Field(
         default=None,
         description=(
-            "Whose history to search: 'hope', 'atlas', or 'all'. "
-            "Omit to search your own history."
+            "Whose history to search: 'hope', 'atlas', 'researcher', or 'all'. "
+            "Omit for the default: HOPE searches everyone's history, any other "
+            "agent searches its own."
         ),
     )
 

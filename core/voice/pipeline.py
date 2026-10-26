@@ -165,6 +165,7 @@ def build_pipeline(agent: VoiceAgent, tools: list[FunctionSchema]) -> VoicePipel
         episodic_memory=episodic_memory,
         session_id=session_id,
         semantic_memory=semantic_memory,
+        owner=agent.name,
     )
 
     pipeline = Pipeline([
