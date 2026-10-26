@@ -43,7 +43,7 @@ Web search goes through [degoog](https://github.com/degoog-org/degoog), a meta-s
 
 - **With [Bun](https://bun.sh) installed** (recommended, no sudo): `curl -fsSL https://bun.sh/install | bash`. On the first start, HOPE clones and builds degoog into `data_store/degoog/` (about a minute).
 - **Without Bun, with Docker:** HOPE runs the official image instead.
-- **Neither:** HOPE still runs; web search just reports that it's off.
+- **Neither:** HOPE still runs; web search just reports that it's off. HOPE never installs Bun or Docker for you.
 
 Either way degoog listens on `127.0.0.1:4444` only. On first start, HOPE installs the Bing, DuckDuckGo and Wikipedia engines with SafeSearch on. degoog's settings page is at <http://localhost:4444/settings>; the password is in `data_store/degoog/settings-password`. Its log is `data_store/logs/degoog.log`. If degoog is already running, HOPE uses it and leaves it alone.
 
@@ -92,6 +92,7 @@ All data lives in `data_store/` (gitignored). Delete it to reset.
 | `SEARCH_PROVIDER` | `degoog` | `degoog` or `searxng` |
 | `DEGOOG_URL` / `SEARXNG_URL` | `:4444` / `:8888` on localhost | Search engine address |
 | `DEGOOG_AUTOSTART` | `true` | Start degoog with HOPE |
+| `DEGOOG_DIR` | `data_store/degoog` | Where HOPE builds degoog |
 | `RESEARCH_MAX_RESEARCHERS` | `4` | Researchers per run |
 | `RESEARCH_MAX_TOOL_CALLS` | `12` | Searches and reads per researcher |
 | `MAX_LIVE_SUBAGENTS` | `5` | Spawned agents alive at once |
