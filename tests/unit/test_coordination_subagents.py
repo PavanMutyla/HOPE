@@ -44,7 +44,7 @@ def test_set_agent_status_on_missing_agent_returns_false(conn):
 @pytest.mark.unit
 def test_list_agents_hides_retired_by_default(conn):
     live = coordination.register_agent(conn, "Emma", "researcher", "bf_emma", "A")
-    gone = coordination.register_agent(conn, "Nicole", "researcher", "af_nicole", "B")
+    gone = coordination.register_agent(conn, "Sarah", "researcher", "af_sarah", "B")
     coordination.set_agent_status(conn, gone, "retired")
     assert [a.agent_id for a in coordination.list_agents(conn)] == [live]
     assert len(coordination.list_agents(conn, include_retired=True)) == 2
@@ -53,7 +53,7 @@ def test_list_agents_hides_retired_by_default(conn):
 @pytest.mark.unit
 def test_retire_live_agents_sweeps_every_leftover(conn):
     coordination.register_agent(conn, "Emma", "researcher", "bf_emma", "A")
-    idle = coordination.register_agent(conn, "Nicole", "researcher", "af_nicole", "B")
+    idle = coordination.register_agent(conn, "Sarah", "researcher", "af_sarah", "B")
     coordination.set_agent_status(conn, idle, "idle")
     assert coordination.retire_live_agents(conn) == 2
     assert coordination.list_agents(conn) == []

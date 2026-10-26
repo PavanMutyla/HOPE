@@ -2,6 +2,7 @@ import asyncio
 import os
 import signal
 import subprocess
+import webbrowser
 from pathlib import Path
 
 from loguru import logger
@@ -22,12 +23,14 @@ from core.voice.voice_pool import VoicePool
 from core.prompt import SYSTEM_PROMPT
 from settings import settings
 from tools.registry import ALL_SCHEMAS, setup as setup_tools
+from tools.web.degoog_service import DegoogService, is_listening
 from tools.web.search import build_search_provider
 
 _REPO_ROOT = Path(__file__).parent
 _DASHBOARD_DIR = _REPO_ROOT / "dashboard"
 _REFLEX_BIN = _REPO_ROOT / ".venv" / "bin" / "reflex"
 _DASHBOARD_PORT = 3000
+_DASHBOARD_OPEN_TIMEOUT = 180  # seconds; the very first Reflex compile is the slow one
 
 
 hope_agent = VoiceAgent(
@@ -61,6 +64,24 @@ def _start_dashboard() -> subprocess.Popen | None:
     return proc
 
 
+async def _open_dashboard_when_ready(proc: subprocess.Popen | None) -> None:
+    """`reflex run` never opens a browser itself. Its first compile takes a
+    while, so this waits for the port to answer rather than opening a tab
+    onto a connection error."""
+    if proc is None or not settings.dashboard_open_browser:
+        return
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + _DASHBOARD_OPEN_TIMEOUT
+    while proc.poll() is None and loop.time() < deadline:
+        if await asyncio.to_thread(is_listening, _DASHBOARD_PORT):
+            url = f"http://localhost:{_DASHBOARD_PORT}"
+            await asyncio.to_thread(webbrowser.open, url)
+            logger.info(f"Opened the dashboard at {url}")
+            return
+        await asyncio.sleep(1)
+    logger.warning(f"Dashboard didn't answer on :{_DASHBOARD_PORT} — open it by hand")
+
+
 def _stop_dashboard(proc: subprocess.Popen | None) -> None:
     if proc is None:
         return
@@ -72,6 +93,16 @@ def _stop_dashboard(proc: subprocess.Popen | None) -> None:
             os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
         except ProcessLookupError:
             pass
+
+
+def _build_degoog() -> DegoogService | None:
+    if not settings.degoog_autostart or settings.search_provider != "degoog":
+        return None
+    return DegoogService(
+        settings.degoog_url,
+        settings.degoog_dir,
+        Path(settings.hope_log_path).parent / "degoog.log",
+    )
 
 
 _LIVE_HEARTBEAT_SECONDS = 10
@@ -105,7 +136,13 @@ async def main():
     logger.add(settings.hope_log_path, level="DEBUG", rotation="5 MB", retention=3, enqueue=True)
 
     dashboard_proc = _start_dashboard()
+    degoog = _build_degoog()
+    asyncio.create_task(_open_dashboard_when_ready(dashboard_proc))
     try:
+        if degoog is not None:
+            await asyncio.to_thread(degoog.start)
+            asyncio.create_task(degoog.warm_up())
+
         registry = AgentRegistry()
         registry.register(hope_agent)
         registry.register(atlas_agent)
@@ -144,7 +181,7 @@ async def main():
         @bundle.worker.event_handler("on_pipeline_started")
         async def on_pipeline_started(worker, frame):
             logger.info("Pipeline started — queuing greeting")
-            bundle.context.add_message({"role": "developer", "content": "Say a short hello to Pavan."})
+            bundle.context.add_message({"role": "developer", "content": f"Say a short hello to {settings.user_name}."})
             await bundle.worker.queue_frames([LLMRunFrame()])
 
         logger.info("HOPE is ready — start speaking!")
@@ -169,6 +206,8 @@ async def main():
             bundle.live_feed.close()
             atlas_team_member.voice.close()
     finally:
+        if degoog is not None:
+            degoog.stop()
         _stop_dashboard(dashboard_proc)
 
 

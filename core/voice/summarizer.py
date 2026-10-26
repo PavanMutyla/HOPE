@@ -9,7 +9,6 @@ from pipecat.frames.frames import MetricsFrame
 from pipecat.metrics.metrics import LLMUsageMetricsData, TTFBMetricsData
 from pipecat.processors.frame_processor import FrameProcessor, FrameDirection
 
-from core.voice.agent_state import agent_state
 from core.voice.context_meter import ContextMeter
 from core.status import StatusPanel
 from memory.episodic_memory.store import EpisodicMemory
@@ -24,8 +23,13 @@ SUMMARY_SYSTEM_PROMPT = (
     "You compress conversation history for a voice assistant. Write a concise "
     "summary of the conversation below. Preserve: decisions made, facts stated, "
     "user preferences, unresolved questions, and task state. Omit filler and "
-    "pleasantries. Write in third person ('Pavan asked...', 'HOPE confirmed...')."
+    f"pleasantries. Write in third person ('{settings.user_name} asked...', 'HOPE confirmed...')."
 )
+
+# The one kind of `developer` message that is this session's own content: a
+# fold of its earlier turns. Every other developer message is scaffolding the
+# pipeline adds itself — last session's warm-start recap, the greeting prompt.
+FOLD_SUMMARY_PREFIX = "Summary of the earlier conversation (auto-generated): "
 
 
 def split_for_summary(
@@ -70,8 +74,28 @@ def _as_text(message: dict) -> str:
     return f"{message.get('role', '?')}: {content}"
 
 
+def summarizable(messages: list[dict]) -> list[dict]:
+    """What the summarizer should read: the conversation, minus scaffolding.
+
+    The warm-start recap is the one that matters. Left in, the summarizer
+    reads last session's recap as something that happened in this session
+    and writes it into this session's summary, which becomes the next
+    session's recap, and so on: one August session's "team mode, tried to
+    contact Suresh" ended up opening every summary for months after. A fold
+    summary is kept, since it is this session's own earlier turns."""
+    return [
+        m for m in messages
+        if m.get("role") != "developer"
+        or str(m.get("content") or "").startswith(FOLD_SUMMARY_PREFIX)
+    ]
+
+
+def has_user_turn(messages: list[dict]) -> bool:
+    return any(m.get("role") == "user" for m in messages)
+
+
 def build_summary_request(to_summarize: list[dict]) -> list[dict]:
-    transcript = "\n".join(_as_text(m) for m in to_summarize)
+    transcript = "\n".join(_as_text(m) for m in summarizable(to_summarize))
     return [
         {"role": "system", "content": SUMMARY_SYSTEM_PROMPT},
         {"role": "user", "content": transcript},
@@ -83,7 +107,7 @@ def rebuild_context(
 ) -> list[dict]:
     summary_message = {
         "role": "developer",
-        "content": f"Summary of the earlier conversation (auto-generated): {summary}",
+        "content": f"{FOLD_SUMMARY_PREFIX}{summary}",
     }
     return [*system_msgs, summary_message, *recent]
 
@@ -91,7 +115,13 @@ def rebuild_context(
 class ContextSummarizer(FrameProcessor):
     """Watches LLM usage metrics; updates the panel; when the context crosses
     the threshold, summarizes older turns in a background task and rewrites
-    the live context. Never blocks the frame pipeline."""
+    the live context. Never blocks the frame pipeline.
+
+    Everything it writes is tagged `owner` (HOPE), not whichever agent holds
+    the pipeline at that moment. Atlas and the researchers are guests on
+    HOPE's conversation; tagging by the active agent filed a whole session
+    under "atlas" because Pavan happened to be talking to Atlas when he quit,
+    which hid it from HOPE's recall and from the next warm start."""
 
     def __init__(
         self,
@@ -102,8 +132,10 @@ class ContextSummarizer(FrameProcessor):
         episodic_memory: EpisodicMemory,
         session_id: str,
         semantic_memory: SemanticMemory,
+        owner: str = "hope",
     ):
         super().__init__()
+        self._owner = owner
         self._context = context
         self._meter = meter
         self._panel = panel
@@ -162,7 +194,7 @@ class ContextSummarizer(FrameProcessor):
             return
 
         await self._write_episodic(head, summary)
-        await self._write_semantic(agent_state.active, summary)
+        await self._write_semantic(self._owner, summary)
 
     async def flush(self) -> None:
         """Fast, LLM-free archive of whatever's still live in context at
@@ -179,13 +211,16 @@ class ContextSummarizer(FrameProcessor):
         # keep_recent=0 -> split_for_summary puts the entire non-system
         # conversation into `to_archive`; nothing is held back as "recent."
         _, to_archive, _ = split_for_summary(snapshot, keep_recent=0)
-        if not to_archive:
+        # A run where Pavan never spoke is HOPE's greeting and nothing else.
+        # Saving it would make it "the latest session", and the next warm
+        # start would recap an empty run instead of the last real one.
+        if not has_user_turn(to_archive):
             return
         try:
             raw_text = "\n".join(_as_text(m) for m in to_archive)
             await asyncio.to_thread(
                 self._episodic_memory.write,
-                agent=agent_state.active,
+                agent=self._owner,
                 session_id=self._session_id,
                 reason="session_end_raw",
                 span_turns=len(to_archive),
@@ -203,7 +238,7 @@ class ContextSummarizer(FrameProcessor):
         try:
             await asyncio.to_thread(
                 self._episodic_memory.write,
-                agent=agent_state.active,
+                agent=self._owner,
                 session_id=self._session_id,
                 reason="threshold",
                 span_turns=len(head),
@@ -281,7 +316,7 @@ async def inject_warm_start(episodic_memory: EpisodicMemory, context, agent: str
     context.add_message({
         "role": "developer",
         "content": (
-            "Summary of your most recent session with Pavan (for context — "
+            f"Summary of your most recent session with {settings.user_name} (for context — "
             f"don't repeat it verbatim): {last_session.summary}"
         ),
     })

@@ -31,6 +31,20 @@ ACCENT_SOFT = "oklch(0.78 0.14 200 / 0.12)"
 LIVE = "oklch(0.80 0.16 145)"           # 10.6:1 — pipeline is running, nothing else
 LIVE_SOFT = "oklch(0.80 0.16 145 / 0.14)"
 
+# ── speakers (the conversation only) ───────────────────────────
+# Pavan asked for a colour per speaker so a transcript can be skimmed by who
+# is talking. This is the one place besides LIVE where colour carries meaning,
+# and it stays inside the console: nothing else in the product uses these.
+# HOPE keeps the product accent. None of the hues is near LIVE's green (145).
+# Labels measure 8.2-10.6:1 on PANEL_BG, and >= 4.8:1 on their own tinted box.
+SPEAKER = {
+    "user": "oklch(0.82 0.11 80)",      # amber: you
+    "hope": ACCENT,                     # cyan: HOPE
+    "atlas": "oklch(0.76 0.12 285)",    # violet: Atlas
+    "subagent": "oklch(0.76 0.13 25)",  # coral: every spawned researcher
+}
+SPEAKER_SOFT = {k: f"{v[:-1]} / 0.10)" for k, v in SPEAKER.items()}  # the box wash
+
 # ── paper (sticky notes keep the prototype's palette) ───────────
 INK = "#3a3226"                         # 11.3:1 on the lightest paper
 

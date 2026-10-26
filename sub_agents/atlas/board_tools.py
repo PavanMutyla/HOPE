@@ -11,6 +11,7 @@ from pathlib import Path
 
 from memory.board import live as board_live
 from memory.board.store import Board
+from settings import settings
 
 _board = Board()
 
@@ -81,7 +82,7 @@ BOARD_TOOL_SCHEMAS = [
             "name": "add_task",
             "description": (
                 "Add an item to the shared board's Today, Planned, or Pending list — "
-                "visible to Pavan and every agent, not just you."
+                f"visible to {settings.user_name} and every agent, not just you."
             ),
             "parameters": {
                 "type": "object",
@@ -188,7 +189,7 @@ BOARD_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "get_location_and_time",
-            "description": "Get Pavan's home location and the current local date/time.",
+            "description": f"Get {settings.user_name}'s home location and the current local date/time.",
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
     },
@@ -196,7 +197,7 @@ BOARD_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "get_weather",
-            "description": "Get the current weather and today's forecast at Pavan's home location.",
+            "description": f"Get the current weather and today's forecast at {settings.user_name}'s home location.",
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
     },

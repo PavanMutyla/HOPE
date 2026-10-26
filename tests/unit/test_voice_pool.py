@@ -58,7 +58,7 @@ def test_reserved_voice_is_never_leased():
 
 @pytest.mark.unit
 def test_exhausted_pool_raises_instead_of_sharing_a_voice():
-    pool = VoicePool(pool=(PooledVoice("af_nicole", "Nicole"),))
+    pool = VoicePool(pool=(PooledVoice("af_sarah", "Sarah"),))
     pool.lease()
     with pytest.raises(VoicePoolExhausted):
         pool.lease()
@@ -66,9 +66,9 @@ def test_exhausted_pool_raises_instead_of_sharing_a_voice():
 
 @pytest.mark.unit
 def test_released_voice_can_be_leased_again():
-    pool = VoicePool(pool=(PooledVoice("af_nicole", "Nicole"),))
+    pool = VoicePool(pool=(PooledVoice("af_sarah", "Sarah"),))
     voice = pool.lease()
-    pool.release("nicole")  # case-insensitive, as it arrives from STT
+    pool.release("sarah")  # case-insensitive, as it arrives from STT
     assert pool.lease() == voice
 
 
@@ -80,3 +80,8 @@ def test_available_counts_down_and_back_up():
     assert pool.available() == total - 1
     pool.release(voice.spoken_name)
     assert pool.available() == total
+
+
+def test_nicole_is_not_in_the_pool():
+    """Left out on request (whispery delivery); see the comment on POOL."""
+    assert "af_nicole" not in {v.voice_id for v in POOL}

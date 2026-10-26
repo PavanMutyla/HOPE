@@ -11,6 +11,8 @@ from typing import Literal
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pydantic import BaseModel, Field
 
+from settings import settings
+
 BoardListType = Literal["today", "planned", "pending"]
 
 
@@ -32,7 +34,7 @@ class DelegateToAtlasArgs(BaseModel):
 class ConnectToAgentArgs(BaseModel):
     name: str = Field(
         description=(
-            "Who Pavan wants to talk to — 'atlas', or a researcher's spoken name "
+            f"Who {settings.user_name} wants to talk to — 'atlas', or a researcher's spoken name "
             "like 'Emma' (see list_subagents)."
         )
     )
@@ -47,8 +49,9 @@ class RecallMemoryArgs(BaseModel):
     agent_name: str | None = Field(
         default=None,
         description=(
-            "Whose history to search: 'hope', 'atlas', or 'all'. "
-            "Omit to search your own history."
+            "Whose history to search: 'hope', 'atlas', 'researcher', or 'all'. "
+            "Omit for the default: HOPE searches everyone's history, any other "
+            "agent searches its own."
         ),
     )
 
@@ -200,7 +203,7 @@ class ReadWebpageArgs(BaseModel):
 
 class StartDeepResearchArgs(BaseModel):
     question: str = Field(
-        description="The research question, in full, including any scope Pavan gave."
+        description=f"The research question, in full, including any scope {settings.user_name} gave."
     )
 
 

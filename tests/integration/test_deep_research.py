@@ -297,9 +297,9 @@ async def test_every_step_is_logged_so_a_run_can_be_watched(tmp_path, stores, lo
         assert f'[research] {name} searching: "{agent.spec.objective}"' in joined
         assert f"[research] {name} reading: https://voices.example/list" in joined
         assert f'[research] {name} read "Voice list"' in joined
-        assert f"[research] {name} finished — read 1 page(s)" in joined
+        assert f"[research] {name} finished, read 1 page(s)" in joined
     assert "[research] Writing the report" in joined
-    assert "done — report saved to" in joined
+    assert "done, report saved to" in joined
 
 
 @pytest.mark.integration

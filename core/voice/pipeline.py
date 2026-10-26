@@ -26,7 +26,8 @@ from core.voice.context_meter import ContextMeter, resolve_context_limit
 from core.voice.kokoro_cache import ensure_kokoro_files, recover_corrupted_kokoro_cache
 from core.voice.summarizer import ContextSummarizer
 from core.voice.team_broadcast import TeamBroadcastObserver
-from core.voice.live_feed import LiveFeedObserver
+from core.voice.live_feed import LiveFeedObserver, LiveUserTap
+from core.voice.transcript_filter import PromptEchoFilter
 from core.voice.team_registry import team_registry
 from core.observability import LangfuseObserver, LangfuseTracer
 from core.status import StatusMonitor, StatusPanel
@@ -37,6 +38,10 @@ from memory.episodic_memory.store import EpisodicMemory
 from memory.procedural_memory.store import ProceduralMemory
 from memory.semantic_memory.store import SemanticMemory
 from settings import settings
+
+# Biases transcription toward the right names and topics. The model sometimes
+# returns this text itself on silence; PromptEchoFilter drops those.
+STT_PROMPT = f"{settings.user_name} is speaking. Conversation about business, tech, and personal topics."
 
 
 def _build_kokoro_tts(voice_id: str) -> KokoroTTSService:
@@ -90,7 +95,7 @@ def build_pipeline(agent: VoiceAgent, tools: list[FunctionSchema]) -> VoicePipel
         settings=OpenAISTTService.Settings(
             model=settings.stt_model,
             language="en",
-            prompt="Pavan is speaking. Conversation about business, tech, and personal topics.",
+            prompt=STT_PROMPT,
         ),
     )
 
@@ -155,6 +160,8 @@ def build_pipeline(agent: VoiceAgent, tools: list[FunctionSchema]) -> VoicePipel
     live_feed = LiveFeed()
     live_feed.start_session(session_id, agent.name)
     live_observer = LiveFeedObserver(live_feed, session_id, meter)
+    # Must sit before context_aggregator.user(), which swallows transcriptions.
+    live_user_tap = LiveUserTap(live_feed, session_id)
     summarizer = ContextSummarizer(
         context=context,
         meter=meter,
@@ -163,14 +170,17 @@ def build_pipeline(agent: VoiceAgent, tools: list[FunctionSchema]) -> VoicePipel
         episodic_memory=episodic_memory,
         session_id=session_id,
         semantic_memory=semantic_memory,
+        owner=agent.name,
     )
 
     pipeline = Pipeline([
         transport.input(),
         stt,
+        PromptEchoFilter(STT_PROMPT),  # before anything reads a transcript
         team_broadcast,
         pre_monitor,
         pre_trace,
+        live_user_tap,
         context_aggregator.user(),
         llm,
         post_monitor,

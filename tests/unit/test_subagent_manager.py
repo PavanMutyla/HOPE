@@ -129,7 +129,7 @@ async def test_at_cap_working_agents_are_never_evicted(registry, blackboard):
 
 @pytest.mark.unit
 async def test_exhausted_voice_pool_refuses_spawn(registry, blackboard):
-    pool = VoicePool(pool=(PooledVoice("af_nicole", "Nicole"),))
+    pool = VoicePool(pool=(PooledVoice("af_sarah", "Sarah"),))
     manager = _manager(registry, blackboard, pool=pool)
     await manager.spawn(_spec("a"), _prompt)
     with pytest.raises(SubAgentLimitReached):

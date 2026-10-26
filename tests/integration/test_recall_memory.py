@@ -1,6 +1,6 @@
 """
-Integration tests for the recall_memory tool handler — agent-scoped episodic
-memory retrieval (tools/registry.py::_make_recall_memory_handler).
+Integration tests for the recall_memory tool handler — episodic memory
+retrieval (HOPE defaults to everyone's history, other agents to their own) (tools/registry.py::_make_recall_memory_handler).
 """
 
 from types import SimpleNamespace
@@ -10,7 +10,9 @@ import pytest
 
 
 @pytest.mark.integration
-async def test_recall_memory_defaults_to_own_agent_history(mock_orchestrator):
+async def test_hope_recall_defaults_to_everyones_history(mock_orchestrator):
+    """HOPE owns the conversation, so its plain "did I ask about X?" must reach
+    Atlas's tasks and research runs too, not only episodes tagged "hope"."""
     from core.voice.agent_state import agent_state
     from tools.registry import _make_recall_memory_handler
 
@@ -24,7 +26,27 @@ async def test_recall_memory_defaults_to_own_agent_history(mock_orchestrator):
     await handler(mock_params)
 
     mock_orchestrator.bundle.episodic_memory.query.assert_called_once_with(
-        "deployment steps", 5, "hope"
+        "deployment steps", 5, None
+    )
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("active", ["atlas", "sarah"])
+async def test_other_agents_recall_defaults_to_their_own_history(mock_orchestrator, active):
+    from core.voice.agent_state import agent_state
+    from tools.registry import _make_recall_memory_handler
+
+    agent_state.active = active
+    mock_orchestrator.bundle.episodic_memory.query = MagicMock(return_value=[])
+    handler = _make_recall_memory_handler(mock_orchestrator)
+
+    mock_params = MagicMock()
+    mock_params.arguments = {"query": "deployment steps"}
+    mock_params.result_callback = AsyncMock()
+    await handler(mock_params)
+
+    mock_orchestrator.bundle.episodic_memory.query.assert_called_once_with(
+        "deployment steps", 5, active
     )
 
 
